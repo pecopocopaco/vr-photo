@@ -237,7 +237,7 @@
     position:absolute; width:22px; height:22px; margin:-11px 0 0 -11px;
     border:2px solid rgba(255,255,255,0.85); border-radius:50%;
     box-shadow:0 0 10px rgba(55,232,212,0.5);
-    display:none; z-index:16; pointer-events:none;
+    display:none; z-index:18; pointer-events:none;
     transition:left .04s linear, top .04s linear;
   }
   .gaze-reticle::after{
@@ -245,14 +245,14 @@
   }
   .gaze-menu{
     display:none; position:absolute; left:50%; bottom:8%; transform:translateX(-50%);
-    gap:10px; z-index:16; padding:8px 10px; border-radius:22px;
+    gap:12px; z-index:16; padding:9px 12px; border-radius:24px;
     background:rgba(10,12,20,0.55); backdrop-filter:blur(8px);
     border:1px solid rgba(255,255,255,0.08);
   }
   .gaze-btn{
     --progress:0;
-    width:34px; height:34px; border-radius:50%; border:none; cursor:default;
-    color:var(--text); font-size:13px;
+    width:40px; height:40px; border-radius:50%; border:none; cursor:default;
+    color:var(--text); font-size:14px;
     display:flex; align-items:center; justify-content:center;
     background:
       conic-gradient(var(--cyan) calc(var(--progress) * 360deg), rgba(255,255,255,0.12) 0deg),
@@ -359,7 +359,7 @@
 
       <p class="hint" style="text-align:left">
         ※ 設定はこのセッション中のみ保持されます（ページを閉じるとリセットされます）。<br>
-        ※「視点操作」をONにすると、Cardboard内でも頭の動きだけで各ボタンを見つめて操作できます（初回に「モーションセンサーへのアクセス」許可が必要です）。
+        ※「視点操作」をONにすると、Cardboard内でも頭の動きだけで操作できます（初回に「モーションセンサーへのアクセス」許可が必要です）。普段は照準だけが表示され、視線を下に向けるとメニューが出てきます。ズレを感じたら、VR画面上部の⟳ボタン（指でタップ）でいつでも正面をリセットできます。
       </p>
     </div>
   </section>
@@ -405,6 +405,7 @@
       <div class="vr-top">
         <button class="circlebtn" id="vrClose">✕</button>
         <span class="vr-index mono" id="vrIndex">1 / 1</span>
+        <button class="circlebtn" id="vrRecenterBtn">⟳</button>
         <button class="circlebtn" id="vrFullscreenBtn">⛶</button>
         <button class="circlebtn" id="vrSettingsBtn">⚙</button>
       </div>
@@ -883,15 +884,20 @@
   // ---------- 視点操作（ジャイロ / dwellクリック） ----------
   const gaze = {
     active:false,
-    x:0.5, y:0.5,               // 現在の照準位置（0〜1の正規化座標）
+    x:0.5, y:0.5,               // 実際に描画・判定に使う照準位置（スムージング後）
+    targetX:0.5, targetY:0.5,   // センサーから算出した目標位置（スムージング前）
     baseline:{ beta:0, gamma:0 }, // recenter基準
     dwellTarget:null,
-    dwellStart:0
+    dwellStart:0,
+    menuVisible:false
   };
   let lastOrientation = { beta:0, gamma:0 };
   let gazeRafId = null;
-  const GAZE_SENSITIVITY = 0.012;
+  const GAZE_SENSITIVITY = 0.007; // 値を下げるほど、同じ首振り量に対する移動量が小さくなり狙いやすくなる
+  const GAZE_SMOOTHING = 0.16;    // 0〜1。小さいほど滑らかだが反応は遅くなる
   const DWELL_MS = 1100;
+  const MENU_SHOW_Y = 0.74; // 視線がこれより下に入るとメニューを表示
+  const MENU_HIDE_Y = 0.58; // これより上に戻ると隠す（ヒステリシスでチラつき防止）
 
   async function enableGazeControlIfPermitted(){
     try {
@@ -912,23 +918,26 @@
     const flip = (angle === 90) ? 1 : -1; // landscape-primary / secondary で軸符号が反転する
     const dx = flip * (lastOrientation.beta  - gaze.baseline.beta);
     const dy = flip * (lastOrientation.gamma - gaze.baseline.gamma);
-    gaze.x = clamp01(0.5 + dx * GAZE_SENSITIVITY);
-    gaze.y = clamp01(0.5 - dy * GAZE_SENSITIVITY);
+    gaze.targetX = clamp01(0.5 + dx * GAZE_SENSITIVITY);
+    gaze.targetY = clamp01(0.5 - dy * GAZE_SENSITIVITY);
   }
   function clamp01(v){ return Math.max(0, Math.min(1, v)); }
 
   function recenterGaze(){
     gaze.baseline = { beta: lastOrientation.beta, gamma: lastOrientation.gamma };
-    gaze.x = 0.5; gaze.y = 0.5;
+    gaze.x = gaze.targetX = 0.5;
+    gaze.y = gaze.targetY = 0.5;
   }
+  $('vrRecenterBtn').addEventListener('click', () => { recenterGaze(); flashControls(); });
 
   function startGazeTracking(){
     gaze.active = true;
+    gaze.menuVisible = false;
     recenterGaze();
     window.addEventListener('deviceorientation', onDeviceOrientation);
     ['Left','Right'].forEach(side => {
       $('gazeReticle'+side).style.display = 'block';
-      $('gazeMenu'+side).style.display = 'flex';
+      $('gazeMenu'+side).style.display = 'none';
     });
     // 視点操作中はタップでのコントロール表示に頼らないため常時表示にする
     $('vrControls').classList.remove('show');
@@ -937,6 +946,7 @@
 
   function stopGazeTracking(){
     gaze.active = false;
+    gaze.menuVisible = false;
     window.removeEventListener('deviceorientation', onDeviceOrientation);
     if (gazeRafId){ cancelAnimationFrame(gazeRafId); gazeRafId = null; }
     ['Left','Right'].forEach(side => {
@@ -959,11 +969,31 @@
   function gazeDwellLoop(){
     if (!gaze.active) return;
 
+    // センサーの生値を毎フレーム少しずつ追従させて、細かい手ブレ・ノイズを吸収する
+    gaze.x += (gaze.targetX - gaze.x) * GAZE_SMOOTHING;
+    gaze.y += (gaze.targetY - gaze.y) * GAZE_SMOOTHING;
+
     ['Left','Right'].forEach(side => {
       const reticle = $('gazeReticle'+side);
       reticle.style.left = (gaze.x * 100) + '%';
       reticle.style.top  = (gaze.y * 100) + '%';
     });
+
+    // 視線が下側に入った時だけメニューを表示（ヒステリシスでチラつきを防止）
+    if (!gaze.menuVisible && gaze.y > MENU_SHOW_Y){
+      gaze.menuVisible = true;
+      ['Left','Right'].forEach(side => { $('gazeMenu'+side).style.display = 'flex'; });
+    } else if (gaze.menuVisible && gaze.y < MENU_HIDE_Y){
+      gaze.menuVisible = false;
+      gaze.dwellTarget = null;
+      ['Left','Right'].forEach(side => { $('gazeMenu'+side).style.display = 'none'; });
+    }
+
+    // メニュー非表示中は狙う対象がないので判定をスキップ
+    if (!gaze.menuVisible){
+      gazeRafId = requestAnimationFrame(gazeDwellLoop);
+      return;
+    }
 
     // ヒット判定は左目側の座標を代表として使う（左右のメニューは同一レイアウト）
     const eyeRect = $('eyeLeft').getBoundingClientRect();
