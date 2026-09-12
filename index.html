@@ -465,6 +465,14 @@ button{ font-family:inherit; }
         </div>
       </div>
       <div class="setting-row">
+        <div class="lbl">MOTION & ORIENTATION ACCESS (方角リング用)</div>
+        <div class="row-between">
+          <span class="tiny" id="compassPermStatus">STATUS: UNKNOWN</span>
+          <button class="btn-icon" id="btnRequestCompass">許可をリクエスト</button>
+        </div>
+        <div class="tiny mt8">ダイアログが出ない場合は、下記の「リセット手順」を参照してください。</div>
+      </div>
+      <div class="setting-row">
         <div class="lbl">EXPORT DATA</div>
         <div class="export-btns">
           <button class="navbtn" id="btnExportJson" style="font-size:10px;">EXPORT JSON</button>
@@ -564,6 +572,7 @@ const S = {
   radarSweeping: false,
   compassHeading: null,
   compassAvailable: false,
+  compassPermissionState: 'unknown',
   dirStats: {}, // sector index (0-15) -> { sum, count }
 };
 
@@ -942,19 +951,33 @@ async function initCompass(){
   try{
     if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
       const state = await DeviceOrientationEvent.requestPermission();
+      S.compassPermissionState = state;
+      updateCompassPermUI();
       if (state === 'granted'){
         window.addEventListener('deviceorientation', onDeviceOrientation, true);
       } else {
         log('COMPASS ACCESS DENIED');
       }
     } else if ('DeviceOrientationEvent' in window){
+      S.compassPermissionState = 'granted'; // no explicit permission model on this browser
+      updateCompassPermUI();
       window.addEventListener('deviceorientation', onDeviceOrientation, true);
     } else {
+      S.compassPermissionState = 'unsupported';
+      updateCompassPermUI();
       log('COMPASS: FEATURE NOT AVAILABLE');
     }
   }catch(e){
+    S.compassPermissionState = 'error';
+    updateCompassPermUI();
     log('COMPASS: FEATURE NOT AVAILABLE');
   }
+}
+function updateCompassPermUI(){
+  const el = document.getElementById('compassPermStatus');
+  if (!el) return;
+  const map = { granted:'STATUS: GRANTED', denied:'STATUS: DENIED', unsupported:'STATUS: NOT SUPPORTED', error:'STATUS: ERROR', unknown:'STATUS: UNKNOWN' };
+  el.textContent = map[S.compassPermissionState] || 'STATUS: UNKNOWN';
 }
 function updateDirReadout(){
   const h = S.compassHeading;
@@ -1344,6 +1367,7 @@ document.getElementById('historyBack').onclick = ()=>showScreen('screen-settings
 document.getElementById('iosBack').onclick = ()=>showScreen('screen-main');
 document.getElementById('btnIosInfo').onclick = ()=>showScreen('screen-ios');
 document.getElementById('btnOpenHistory').onclick = ()=>{ renderHistory(); showScreen('screen-history'); };
+document.getElementById('btnRequestCompass').onclick = ()=>{ initCompass(); };
 
 document.getElementById('navScan').onclick = ()=>runFullScan({silent:false});
 document.getElementById('navWalk').onclick = ()=>showScreen('screen-walk');
