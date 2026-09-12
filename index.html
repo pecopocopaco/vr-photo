@@ -1508,23 +1508,34 @@ function playBootLog(){
 }
 playBootLog();
 
-document.getElementById('btnInit').addEventListener('click', async ()=>{
+document.getElementById('btnInit').addEventListener('click', function(){
   const btn = document.getElementById('btnInit');
   btn.textContent = '[ SYSTEM ONLINE ]';
   btn.disabled = true;
+
+  // IMPORTANT: on iOS, DeviceOrientationEvent.requestPermission() must be
+  // invoked synchronously, directly inside the click handler, with no
+  // "await" ahead of it — otherwise the user-gesture "activation" expires
+  // and Safari silently skips the permission dialog. So this call happens
+  // first, before any other async setup below.
+  initCompass();
+
+  runRestOfInit();
+});
+
+async function runRestOfInit(){
   await loadSettings();
   updateNetworkInfoHints();
   renderOnlineStatus();
   startGeoWatch();
   await loadDirStats();
-  initCompass();
   log('SYSTEM ONLINE');
   showScreen('screen-main');
   if (S.settings.autoScan === 'ON') runFullScan({silent:false});
   if ('serviceWorker' in navigator){
     navigator.serviceWorker.register('sw.js').catch(()=>{});
   }
-});
+}
 
 /* ==========================================================================
    18. GLOBAL EVENTS
