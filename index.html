@@ -2,1153 +2,1544 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>SBS VR Photo</title>
-
-<!-- ホーム画面に追加した際、Safariのバーを消してスタンドアロン表示にする -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<title>WI-FI REALTIME RADAR</title>
+<meta name="description" content="WIRELESS SIGNAL INTELLIGENCE SYSTEM">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#020605">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="theme-color" content="#05060a">
-
+<meta name="apple-mobile-web-app-title" content="RADAR">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
-  :root{
-    --bg:        #05060a;
-    --panel:     #0d1018;
-    --panel-2:   #12151f;
-    --line:      #202537;
-    --text:      #eef1f8;
-    --text-dim:  #7d84a0;
-    --cyan:      #37e8d4;
-    --violet:    #7c6cff;
-    --danger:    #ff5d7a;
-    --radius:    18px;
-  }
+/* ==========================================================================
+   WI-FI REALTIME RADAR — design tokens
+   bg      : #020605  (near-black)
+   main    : #00FF9C  (neon green)
+   sub     : #00CFFF  (cyan)
+   warn    : #FFB000  (amber)
+   danger  : #FF304F  (red)
+   font    : JetBrains Mono
+   ========================================================================== */
+:root{
+  --bg:#020605;
+  --bg-panel:#050c0a;
+  --bg-panel-2:#07120e;
+  --main:#00FF9C;
+  --main-dim:#00a86a;
+  --sub:#00CFFF;
+  --warn:#FFB000;
+  --danger:#FF304F;
+  --grid:rgba(0,255,156,0.07);
+  --border:rgba(0,255,156,0.28);
+  --border-dim:rgba(0,255,156,0.14);
+  --text-dim:rgba(0,255,156,0.55);
+  --safe-t:env(safe-area-inset-top,0px);
+  --safe-b:env(safe-area-inset-bottom,0px);
+  --safe-l:env(safe-area-inset-left,0px);
+  --safe-r:env(safe-area-inset-right,0px);
+}
 
-  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  html,body{ height:100%; overscroll-behavior:none; }
-  body{
-    margin:0;
-    background:var(--bg);
-    color:var(--text);
-    font-family:'Space Grotesk', -apple-system, sans-serif;
-    -webkit-user-select:none; user-select:none;
-    overflow:hidden;
-  }
-  .mono{ font-family:'JetBrains Mono', monospace; letter-spacing:0.02em; }
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+html,body{
+  margin:0; padding:0; height:100%; background:var(--bg); color:var(--main);
+  font-family:'JetBrains Mono', 'IBM Plex Mono', ui-monospace, monospace;
+  overflow:hidden; overscroll-behavior:none; user-select:none;
+  -webkit-user-select:none;
+}
+body{
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size:22px 22px;
+}
+button{ font-family:inherit; }
+::selection{ background:var(--main); color:#000; }
 
-  #app{ position:fixed; inset:0; }
-  .screen{
-    position:absolute; inset:0;
-    display:flex; flex-direction:column;
-    opacity:1; pointer-events:auto;
-    transition:opacity .25s ease;
-  }
-  .screen.hidden{ opacity:0; pointer-events:none; }
+/* CRT scanline + vignette overlay, purely decorative, never blocks input */
+#scanlines{
+  position:fixed; inset:0; z-index:9000; pointer-events:none;
+  background:repeating-linear-gradient(
+    to bottom, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 2px,
+    rgba(0,0,0,0.12) 3px, rgba(0,0,0,0) 4px
+  );
+  mix-blend-mode:overlay; opacity:0.5;
+}
+#scanlines::after{
+  content:''; position:absolute; inset:0;
+  background:radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,0.55) 100%);
+}
+#scanmove{
+  position:fixed; left:0; right:0; height:120px; z-index:9001; pointer-events:none;
+  background:linear-gradient(to bottom, rgba(0,255,156,0) 0%, rgba(0,255,156,0.05) 50%, rgba(0,255,156,0) 100%);
+  animation:scanmove 7s linear infinite;
+}
+@keyframes scanmove{ 0%{top:-120px;} 100%{top:100%;} }
 
-  /* ---------- ホーム画面 ---------- */
-  #screen-home{
-    align-items:center; justify-content:center;
-    padding:32px;
-    background:
-      radial-gradient(circle at 50% 18%, rgba(124,108,255,0.16), transparent 55%),
-      radial-gradient(circle at 50% 85%, rgba(55,232,212,0.10), transparent 50%),
-      var(--bg);
-  }
-  .home-inner{ width:100%; max-width:420px; display:flex; flex-direction:column; align-items:center; }
+.glitch{ animation:glitchtxt 6s infinite; }
+@keyframes glitchtxt{
+  0%,96%,100%{ transform:none; text-shadow:none; }
+  97%{ transform:translate(1px,0); text-shadow:-1px 0 var(--sub), 1px 0 var(--danger); }
+  98%{ transform:translate(-1px,0); text-shadow:1px 0 var(--sub); }
+}
 
-  .reticle{
-    width:120px; height:120px; border-radius:50%;
-    display:flex; align-items:center; justify-content:center;
-    margin-bottom:22px;
-    background:
-      conic-gradient(from 0deg, var(--cyan), var(--violet), var(--cyan));
-    padding:2px;
-    animation:spin 14s linear infinite;
-  }
-  @keyframes spin{ to{ transform:rotate(360deg); } }
-  .reticle-inner{
-    width:100%; height:100%; border-radius:50%;
-    background:var(--bg);
-    display:flex; align-items:center; justify-content:center;
-  }
-  .reticle-inner::before{
-    content:"";
-    width:14px; height:14px; border-radius:50%;
-    background:var(--text);
-    box-shadow:0 0 18px 4px rgba(238,241,248,0.5);
-  }
+#app{ position:relative; height:100%; width:100%; }
+.screen{
+  position:absolute; inset:0; display:none; flex-direction:column;
+  padding-top:calc(var(--safe-t) + 8px);
+  padding-bottom:calc(var(--safe-b) + 8px);
+  padding-left:calc(var(--safe-l) + 12px);
+  padding-right:calc(var(--safe-r) + 12px);
+}
+.screen.active{ display:flex; }
 
-  h1.title{
-    font-size:28px; font-weight:700; letter-spacing:0.06em;
-    margin:0 0 4px; text-align:center;
-  }
-  .subtitle{
-    font-size:13px; color:var(--text-dim); text-align:center;
-    margin:0 0 32px; letter-spacing:0.04em;
-  }
+/* ---------- BOOT ---------- */
+#screen-boot{ align-items:center; justify-content:center; text-align:center; gap:18px; }
+.boot-logo{ font-size:15px; letter-spacing:4px; color:var(--sub); opacity:0.85; }
+.boot-title{ font-size:30px; font-weight:800; letter-spacing:2px; }
+.boot-sub{ font-size:11px; letter-spacing:3px; color:var(--text-dim); }
+.boot-log{
+  width:min(320px,84vw); height:150px; overflow:hidden; text-align:left;
+  border:1px solid var(--border-dim); background:rgba(0,255,156,0.03);
+  padding:10px 12px; font-size:11px; line-height:1.75; color:var(--main-dim);
+}
+.boot-log div span{ color:var(--main); }
+.btn-init{
+  margin-top:6px; padding:16px 30px; min-height:48px; background:transparent;
+  border:1px solid var(--main); color:var(--main); font-size:13px; letter-spacing:3px;
+  font-weight:700; cursor:pointer;
+}
+.btn-init:active{ background:var(--main); color:#020605; }
+.boot-cursor{ display:inline-block; width:7px; height:12px; background:var(--main); animation:blink 1s step-end infinite; vertical-align:middle; }
+@keyframes blink{ 50%{opacity:0;} }
 
-  .btn{
-    width:100%; padding:16px 20px; margin-bottom:12px;
-    border-radius:14px; border:1px solid var(--line);
-    background:var(--panel); color:var(--text);
-    font-family:inherit; font-size:15px; font-weight:500;
-    display:flex; align-items:center; justify-content:space-between;
-    cursor:pointer;
-  }
-  .btn:active{ background:var(--panel-2); }
-  .btn.primary{
-    background:linear-gradient(135deg, var(--cyan), var(--violet));
-    color:#04050a; border:none; font-weight:700;
-    justify-content:center;
-  }
-  .btn.primary:disabled{
-    background:var(--panel); color:var(--text-dim); opacity:0.6;
-  }
-  .btn .count{ font-family:'JetBrains Mono', monospace; color:var(--cyan); font-size:13px; }
-  .btn.primary .count{ color:#04050a; opacity:0.7; }
+/* ---------- HEADER (shared) ---------- */
+.hdr{ display:flex; align-items:flex-start; justify-content:space-between; padding-bottom:8px; border-bottom:1px solid var(--border-dim); flex-shrink:0; }
+.hdr-title{ font-size:15px; font-weight:800; letter-spacing:2px; }
+.hdr-sub{ font-size:9.5px; color:var(--text-dim); letter-spacing:1px; margin-top:3px; display:flex; align-items:center; gap:6px; }
+.dot{ width:6px; height:6px; border-radius:50%; background:var(--main); display:inline-block; box-shadow:0 0 6px var(--main); animation:pulse2 2s ease-in-out infinite; }
+.dot.off{ background:var(--danger); box-shadow:0 0 6px var(--danger); }
+@keyframes pulse2{ 0%,100%{opacity:1;} 50%{opacity:0.35;} }
+.hdr-right{ text-align:right; font-size:9.5px; color:var(--text-dim); }
+.btn-icon{ background:transparent; border:1px solid var(--border); color:var(--main); font-size:10px; letter-spacing:1px; padding:7px 10px; min-height:34px; }
 
-  input[type=file]{ display:none; }
+/* ---------- MAIN SCREEN ---------- */
+#screen-main{ overflow-y:auto; -webkit-overflow-scrolling:touch; }
+.radar-wrap{ position:relative; display:flex; align-items:center; justify-content:center; margin:10px auto 2px; width:min(84vw,320px); aspect-ratio:1/1; }
+#radarCanvas{ width:100%; height:100%; }
+.radar-caption{ text-align:center; font-size:9.5px; letter-spacing:3px; color:var(--text-dim); margin-top:2px; }
+.dir-readout{ display:flex; justify-content:center; gap:16px; font-size:9.5px; letter-spacing:1px; color:var(--sub); margin-top:4px; }
 
-  .hint{
-    margin-top:18px; font-size:11.5px; line-height:1.6;
-    color:var(--text-dim); text-align:center;
-  }
+.panel{
+  border:1px solid var(--border-dim); background:var(--bg-panel);
+  padding:10px 12px; margin-top:10px; flex-shrink:0;
+}
+.panel-title{ font-size:9.5px; letter-spacing:2px; color:var(--sub); margin-bottom:8px; display:flex; justify-content:space-between; }
 
-  /* ---------- 設定画面 ---------- */
-  #screen-settings{ background:var(--bg); padding:0; }
-  .settings-header{
-    display:flex; align-items:center; gap:12px;
-    padding:20px 20px 14px; border-bottom:1px solid var(--line);
-  }
-  .settings-header h2{ font-size:18px; margin:0; flex:1; }
-  .iconbtn{
-    width:38px; height:38px; border-radius:10px;
-    background:var(--panel); border:1px solid var(--line);
-    color:var(--text); display:flex; align-items:center; justify-content:center;
-    font-size:16px; cursor:pointer;
-  }
-  .settings-body{ flex:1; overflow-y:auto; padding:18px 20px 40px; }
-  .group{ margin-bottom:26px; }
-  .group-label{
-    font-size:11px; text-transform:uppercase; letter-spacing:0.12em;
-    color:var(--text-dim); margin-bottom:10px;
-  }
-  .chip-row{ display:flex; flex-wrap:wrap; gap:8px; }
-  .chip{
-    padding:9px 14px; border-radius:20px;
-    border:1px solid var(--line); background:var(--panel);
-    color:var(--text-dim); font-size:13px; font-family:'JetBrains Mono', monospace;
-    cursor:pointer;
-  }
-  .chip.active{
-    background:rgba(55,232,212,0.12); border-color:var(--cyan); color:var(--cyan);
-  }
-  .toggle-row{
-    display:flex; align-items:center; justify-content:space-between;
-    padding:12px 0; border-bottom:1px solid var(--line);
-  }
-  .toggle-row:last-child{ border-bottom:none; }
-  .toggle{
-    width:46px; height:27px; border-radius:14px; background:var(--panel-2);
-    border:1px solid var(--line); position:relative; cursor:pointer;
-  }
-  .toggle::after{
-    content:""; position:absolute; top:2px; left:2px;
-    width:21px; height:21px; border-radius:50%; background:var(--text-dim);
-    transition:transform .15s ease, background .15s ease;
-  }
-  .toggle.on{ border-color:var(--cyan); }
-  .toggle.on::after{ transform:translateX(19px); background:var(--cyan); }
+.quality-row{ display:flex; align-items:baseline; justify-content:space-between; }
+.quality-val{ font-size:30px; font-weight:800; }
+.quality-tag{ font-size:11px; letter-spacing:2px; padding:3px 8px; border:1px solid currentColor; }
+.bar-track{ height:8px; background:rgba(0,255,156,0.08); margin-top:8px; overflow:hidden; }
+.bar-fill{ height:100%; background:linear-gradient(90deg,var(--main-dim),var(--main)); width:0%; transition:width .5s ease; }
 
-  /* ---------- VR画面 ---------- */
-  #screen-vr{ background:#000; }
-  .vr-eyes{ position:absolute; inset:0; display:flex; }
-  .eye{
-    flex:1; height:100%; position:relative; overflow:hidden;
-    background:#000;
-    display:flex; align-items:center; justify-content:center;
-  }
-  .eye canvas{
-    max-width:100%; max-height:100%; width:100%; height:100%;
-    display:block;
-    transition:opacity .35s ease;
-  }
-  .eye-divider{
-    position:absolute; top:0; bottom:0; left:50%; width:1px;
-    background:rgba(255,255,255,0.06);
-  }
+.grid2{ display:grid; grid-template-columns:1fr 1fr; gap:8px 14px; }
+.metric{ }
+.metric-label{ font-size:9px; letter-spacing:1.5px; color:var(--text-dim); }
+.metric-val{ font-size:17px; font-weight:700; margin-top:2px; }
+.metric-val.na{ color:var(--text-dim); font-size:14px; }
 
-  .vr-spinner{
-    position:absolute; top:50%; left:50%; width:28px; height:28px;
-    margin:-14px 0 0 -14px; border-radius:50%;
-    border:2px solid rgba(255,255,255,0.15); border-top-color:var(--cyan);
-    display:none; z-index:15; animation:vrspin .7s linear infinite;
-  }
-  .vr-spinner.show{ display:block; }
-  @keyframes vrspin{ to{ transform:rotate(360deg); } }
+.kv{ display:flex; justify-content:space-between; padding:4px 0; font-size:12px; border-bottom:1px dashed var(--border-dim); }
+.kv:last-child{ border-bottom:none; }
+.kv .k{ color:var(--text-dim); letter-spacing:1px; font-size:10px; }
+.kv .v{ font-weight:700; }
 
-  .rotate-hint{
-    position:absolute; inset:0; background:#000;
-    display:none; align-items:center; justify-content:center; flex-direction:column;
-    gap:14px; z-index:20; text-align:center; padding:40px;
-  }
-  .rotate-hint.show{ display:flex; }
-  .rotate-hint .icon{ font-size:40px; }
-  .rotate-hint p{ color:var(--text-dim); font-size:13px; max-width:240px; line-height:1.6; margin:0; }
+.status-line{ display:flex; align-items:center; gap:6px; font-size:12px; font-weight:700; }
 
-  .vr-controls{
-    position:absolute; inset:0; z-index:10;
-    display:flex; flex-direction:column; justify-content:space-between;
-    padding:18px; opacity:0; pointer-events:none;
-    transition:opacity .2s ease;
-  }
-  .vr-controls.show{ opacity:1; pointer-events:auto; }
-  .vr-top, .vr-bottom{ display:flex; justify-content:space-between; align-items:center; }
-  .vr-bottom{ justify-content:center; }
-  .vr-playbar{
-    display:flex; align-items:center; gap:28px;
-    background:rgba(10,12,20,0.7); backdrop-filter:blur(10px);
-    padding:14px 26px; border-radius:32px; border:1px solid rgba(255,255,255,0.08);
-  }
-  .vr-playbar button{
-    background:none; border:none; color:var(--text);
-    font-size:20px; cursor:pointer; display:flex;
-  }
-  .vr-playbar button.play{ font-size:24px; color:var(--cyan); }
-  .circlebtn{
-    width:40px; height:40px; border-radius:50%;
-    background:rgba(10,12,20,0.7); backdrop-filter:blur(10px);
-    border:1px solid rgba(255,255,255,0.08); color:var(--text);
-    display:flex; align-items:center; justify-content:center; font-size:15px;
-  }
-  .vr-index{
-    font-family:'JetBrains Mono', monospace; font-size:11px; color:var(--text-dim);
-    background:rgba(10,12,20,0.7); backdrop-filter:blur(10px);
-    padding:6px 12px; border-radius:20px; border:1px solid rgba(255,255,255,0.08);
-  }
+.graph-tabs{ display:flex; gap:6px; margin-bottom:8px; }
+.graph-tab{ flex:1; background:transparent; border:1px solid var(--border-dim); color:var(--text-dim); font-size:9px; letter-spacing:1px; padding:6px 2px; min-height:30px; }
+.graph-tab.active{ color:var(--main); border-color:var(--main); }
+#graphCanvas{ width:100%; height:110px; display:block; }
 
-  /* ---------- 視点操作（ジャイロ）UI：各eye内に複製表示 ---------- */
-  .gaze-reticle{
-    position:absolute; width:22px; height:22px; margin:-11px 0 0 -11px;
-    border:2px solid rgba(255,255,255,0.85); border-radius:50%;
-    box-shadow:0 0 10px rgba(55,232,212,0.5);
-    display:none; z-index:18; pointer-events:none;
-    transition:left .04s linear, top .04s linear;
-  }
-  .gaze-reticle::after{
-    content:""; position:absolute; inset:7px; border-radius:50%; background:var(--cyan);
-  }
-  .gaze-menu{
-    display:none; position:absolute; left:50%; bottom:8%; transform:translateX(-50%);
-    gap:12px; z-index:16; padding:9px 12px; border-radius:24px;
-    background:rgba(10,12,20,0.55); backdrop-filter:blur(8px);
-    border:1px solid rgba(255,255,255,0.08);
-  }
-  .gaze-btn{
-    --progress:0;
-    width:40px; height:40px; border-radius:50%; border:none; cursor:default;
-    color:var(--text); font-size:14px;
-    display:flex; align-items:center; justify-content:center;
-    background:
-      conic-gradient(var(--cyan) calc(var(--progress) * 360deg), rgba(255,255,255,0.12) 0deg),
-      radial-gradient(circle, var(--panel-2) 60%, var(--panel-2) 61%);
-    background-blend-mode:normal;
-  }
+/* ---------- BOTTOM NAV ---------- */
+.navbar{
+  display:grid; grid-template-columns:repeat(4,1fr); gap:8px;
+  padding-top:10px; margin-top:auto; flex-shrink:0;
+}
+.navbtn{
+  background:var(--bg-panel); border:1px solid var(--border); color:var(--main);
+  font-size:11px; letter-spacing:2px; font-weight:700; padding:14px 4px; min-height:48px;
+}
+.navbtn:active{ background:var(--main); color:#020605; }
+.navbtn.rec{ border-color:var(--danger); color:var(--danger); }
+
+/* ---------- SCAN OVERLAY ---------- */
+#scanOverlay{
+  position:fixed; inset:0; z-index:8000; background:rgba(1,4,3,0.92);
+  display:none; align-items:center; justify-content:center; flex-direction:column;
+  padding:24px;
+}
+#scanOverlay.active{ display:flex; }
+.scan-box{ width:min(320px,86vw); border:1px solid var(--border); background:var(--bg-panel); padding:18px; }
+.scan-title{ font-size:12px; letter-spacing:3px; color:var(--sub); margin-bottom:12px; text-align:center; }
+#scanLog{ font-size:11px; line-height:2; height:210px; overflow:hidden; color:var(--main-dim); }
+#scanLog div span{ color:var(--main); }
+
+/* ---------- SUB SCREENS (map/log/settings/history/ios/walk) ---------- */
+.sub-title{ font-size:14px; font-weight:800; letter-spacing:2px; }
+.back-btn{ background:transparent; border:1px solid var(--border); color:var(--main); font-size:10px; padding:8px 12px; min-height:36px; letter-spacing:1px; }
+
+#mapEl{ flex:1; margin-top:10px; border:1px solid var(--border-dim); filter:grayscale(0.15) invert(0.92) hue-rotate(180deg) brightness(0.95) contrast(1.05); background:#000; }
+.map-legend{ display:flex; gap:10px; flex-wrap:wrap; font-size:9px; color:var(--text-dim); margin-top:8px; }
+.map-legend span{ display:inline-flex; align-items:center; gap:4px; }
+.legend-dot{ width:8px; height:8px; border-radius:50%; display:inline-block; }
+
+#logList{ flex:1; overflow-y:auto; margin-top:10px; font-size:11px; line-height:1.9; border:1px solid var(--border-dim); background:var(--bg-panel); padding:10px; }
+#logList div{ border-bottom:1px dashed rgba(0,255,156,0.06); padding:2px 0; }
+#logList .t{ color:var(--text-dim); }
+
+.settings-list{ flex:1; overflow-y:auto; margin-top:10px; }
+.setting-row{ padding:12px 0; border-bottom:1px solid var(--border-dim); }
+.setting-row .lbl{ font-size:11px; letter-spacing:1.5px; color:var(--main); margin-bottom:8px; }
+.seg{ display:flex; gap:6px; }
+.seg-btn{ flex:1; background:transparent; border:1px solid var(--border-dim); color:var(--text-dim); font-size:10px; padding:9px 4px; min-height:38px; letter-spacing:1px; }
+.seg-btn.active{ border-color:var(--main); color:var(--main); background:rgba(0,255,156,0.06); }
+
+.hist-item{ border:1px solid var(--border-dim); background:var(--bg-panel); padding:10px 12px; margin-top:8px; }
+.hist-top{ display:flex; justify-content:space-between; font-size:11px; font-weight:700; }
+.hist-grid{ display:flex; gap:14px; margin-top:6px; font-size:10px; color:var(--text-dim); }
+.hist-grid b{ color:var(--main); font-size:11px; }
+#historyList{ flex:1; overflow-y:auto; margin-top:4px; }
+.empty-hint{ color:var(--text-dim); font-size:11px; text-align:center; margin-top:30px; letter-spacing:1px; }
+
+.ios-box{ border:1px solid var(--danger); background:rgba(255,48,79,0.06); padding:16px; margin-top:14px; }
+.ios-box h3{ margin:0 0 10px; font-size:12px; letter-spacing:2px; color:var(--danger); }
+.ios-box p{ font-size:11px; line-height:1.8; color:var(--main-dim); margin:0 0 12px; }
+.restricted-list{ display:flex; flex-wrap:wrap; gap:6px; }
+.restricted-tag{ font-size:9.5px; border:1px solid var(--danger); color:var(--danger); padding:4px 8px; letter-spacing:1px; }
+
+/* ---------- WALK SCREEN ---------- */
+#screen-walk{ align-items:stretch; }
+.walk-hero{ text-align:center; margin-top:6px; }
+.walk-state{ font-size:11px; letter-spacing:3px; color:var(--danger); display:flex; align-items:center; justify-content:center; gap:8px; }
+.rec-dot{ width:9px; height:9px; border-radius:50%; background:var(--danger); animation:pulse2 1s ease-in-out infinite; }
+.walk-time{ font-size:44px; font-weight:800; margin-top:6px; letter-spacing:1px; }
+.walk-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:16px; }
+.walk-card{ border:1px solid var(--border-dim); background:var(--bg-panel); padding:12px; text-align:center; }
+.walk-card .l{ font-size:9px; color:var(--text-dim); letter-spacing:1.5px; }
+.walk-card .v{ font-size:19px; font-weight:800; margin-top:4px; }
+.walk-actions{ margin-top:auto; display:flex; flex-direction:column; gap:10px; padding-top:14px; }
+.btn-stop{ background:var(--danger); color:#1a0006; border:none; font-size:14px; font-weight:800; letter-spacing:3px; padding:18px; min-height:52px; }
+.walk-interval{ text-align:center; font-size:9.5px; color:var(--text-dim); letter-spacing:1px; margin-top:6px; }
+
+/* alert toast */
+#alertToast{
+  position:fixed; left:50%; transform:translateX(-50%) translateY(-10px);
+  top:calc(var(--safe-t) + 10px); z-index:9500; background:rgba(255,48,79,0.14);
+  border:1px solid var(--danger); color:var(--danger); font-size:11px; letter-spacing:1px;
+  padding:10px 16px; opacity:0; pointer-events:none; transition:opacity .3s, transform .3s;
+  max-width:88vw; text-align:center;
+}
+#alertToast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+.tiny{ font-size:9px; color:var(--text-dim); letter-spacing:1px; }
+.mt8{ margin-top:8px; } .mt10{ margin-top:10px; } .mt14{ margin-top:14px; }
+.row-between{ display:flex; justify-content:space-between; align-items:center; }
+.export-btns{ display:flex; gap:8px; margin-top:10px; }
+.export-btns button{ flex:1; }
 </style>
 </head>
 <body>
 
+<div id="scanlines"></div>
+<div id="scanmove"></div>
+<div id="alertToast"></div>
+
 <div id="app">
 
-  <!-- ============ ホーム画面 ============ -->
-  <section id="screen-home" class="screen">
-    <div class="home-inner">
-      <div class="reticle"><div class="reticle-inner"></div></div>
-      <h1 class="title">SBS VR PHOTO</h1>
-      <p class="subtitle mono">CARDBOARD SLIDESHOW VIEWER</p>
+  <!-- ============ BOOT SCREEN ============ -->
+  <section id="screen-boot" class="screen active">
+    <div class="boot-logo">WIRELESS SIGNAL INTELLIGENCE SYSTEM</div>
+    <div class="boot-title glitch">WI-FI RADAR</div>
+    <div class="boot-sub">v1.0 // DIAGNOSTIC TERMINAL</div>
+    <div class="boot-log" id="bootLog"></div>
+    <button class="btn-init" id="btnInit">[ INITIALIZE SYSTEM ]</button>
+    <div class="tiny" style="max-width:280px;">実測できる通信品質のみを表示します。周辺Wi-Fi一覧の取得は行いません。</div>
+  </section>
 
-      <label class="btn" for="fileInput">
-        <span id="pickLabel">写真を選択</span>
-        <span class="count mono" id="countLabel">0枚</span>
-      </label>
-      <input type="file" id="fileInput" accept="image/*,video/*" multiple>
+  <!-- ============ MAIN SCREEN ============ -->
+  <section id="screen-main" class="screen">
+    <div class="hdr">
+      <div>
+        <div class="hdr-title">WIRELESS // RADAR</div>
+        <div class="hdr-sub"><span class="dot" id="onlineDot"></span><span id="onlineText">SYSTEM ONLINE</span></div>
+      </div>
+      <div class="hdr-right">
+        <div id="clockTxt">--:--:--</div>
+        <button class="btn-icon mt8" id="btnSettings">SETTINGS</button>
+      </div>
+    </div>
 
-      <button class="btn" id="addMoreBtn" style="display:none">
-        追加で選ぶ
-        <span style="color:var(--text-dim)">＋</span>
-      </button>
+    <div class="radar-wrap">
+      <canvas id="radarCanvas" width="600" height="600"></canvas>
+    </div>
+    <div class="radar-caption" id="radarCaption">SIGNAL RADAR // IDLE</div>
+    <div class="dir-readout" id="dirReadout">
+      <span id="dirHeadingTxt">HEADING: N/A</span>
+      <span id="dirSectorTxt">SECTOR AVG: N/A</span>
+    </div>
+    <div class="tiny" style="text-align:center; max-width:300px; margin:2px auto 0;">
+      外周リングは実測ログに基づく方向別の平均品質です。APの位置や電波の到達範囲を示すものではありません。
+    </div>
 
-      <button class="btn primary" id="startBtn" disabled>VR開始</button>
-      <button class="btn" id="settingsBtn">
-        設定
-        <span style="color:var(--text-dim)">›</span>
-      </button>
+    <div class="panel">
+      <div class="panel-title"><span>SIGNAL QUALITY</span><span id="qualityScoreLbl">SCORE</span></div>
+      <div class="quality-row">
+        <div class="quality-val" id="qualityVal">--</div>
+        <div class="quality-tag" id="qualityTag">N/A</div>
+      </div>
+      <div class="bar-track"><div class="bar-fill" id="qualityBar"></div></div>
+    </div>
 
-      <p class="hint" id="clearHint" style="display:none">
-        <span id="clearSelection" style="text-decoration:underline; color:var(--cyan); cursor:pointer;">選択をすべてクリア</span>
-      </p>
+    <div class="panel">
+      <div class="panel-title"><span>LINK METRICS</span><span></span></div>
+      <div class="grid2">
+        <div class="metric"><div class="metric-label">LATENCY</div><div class="metric-val" id="mLatency">--</div></div>
+        <div class="metric"><div class="metric-label">PACKET LOSS</div><div class="metric-val" id="mLoss">--</div></div>
+        <div class="metric"><div class="metric-label">DOWNLOAD</div><div class="metric-val" id="mDown">--</div></div>
+        <div class="metric"><div class="metric-label">UPLOAD</div><div class="metric-val" id="mUp">--</div></div>
+      </div>
+    </div>
 
-      <p class="hint">
-        「写真を選択」をタップすると、写真・動画をアルバムから複数選択できます。<br>
-        一度に選べる枚数がうまく増えない場合は「追加で選ぶ」で少しずつ足せます。<br>
-        より没入感のある表示にするには、Safariの共有メニューから<br>
-        「ホーム画面に追加」してから起動してください。
-      </p>
+    <div class="panel">
+      <div class="panel-title"><span>GRAPH</span><span class="tiny" id="graphRangeLbl"></span></div>
+      <div class="graph-tabs">
+        <button class="graph-tab active" data-g="quality">QUALITY</button>
+        <button class="graph-tab" data-g="latency">LATENCY</button>
+        <button class="graph-tab" data-g="download">DOWNLOAD</button>
+        <button class="graph-tab" data-g="upload">UPLOAD</button>
+      </div>
+      <canvas id="graphCanvas" width="600" height="220"></canvas>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title"><span>LOCATION</span><span id="gpsBadge">--</span></div>
+      <div class="kv"><span class="k">LAT</span><span class="v" id="locLat">--</span></div>
+      <div class="kv"><span class="k">LON</span><span class="v" id="locLon">--</span></div>
+      <div class="kv"><span class="k">ACCURACY</span><span class="v" id="locAcc">--</span></div>
+      <div class="kv"><span class="k">HEADING</span><span class="v" id="locHeading">--</span></div>
+      <div class="kv"><span class="k">SPEED</span><span class="v" id="locSpeed">--</span></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title"><span>NETWORK</span><span></span></div>
+      <div class="status-line" id="netStatusLine"><span class="dot"></span><span>CHECKING...</span></div>
+      <div class="kv mt8"><span class="k">CONNECTION TYPE</span><span class="v" id="netType">N/A</span></div>
+      <div class="kv"><span class="k">DOWNLINK (HINT)</span><span class="v" id="netDownlinkHint">N/A</span></div>
+      <div class="kv"><span class="k">RTT (HINT)</span><span class="v" id="netRttHint">N/A</span></div>
+      <div class="kv"><span class="k">SSID</span><span class="v" id="netSsid">N/A</span></div>
+      <div class="kv"><span class="k">RSSI</span><span class="v" id="netRssi">N/A</span></div>
+      <button class="btn-icon mt10" style="width:100%;" id="btnIosInfo">iOS WEB SECURITY — 制限事項について</button>
+    </div>
+
+    <div style="height:6px;"></div>
+    <div class="navbar">
+      <button class="navbtn" id="navScan">[ SCAN ]</button>
+      <button class="navbtn" id="navWalk">[ WALK ]</button>
+      <button class="navbtn" id="navMap">[ MAP ]</button>
+      <button class="navbtn" id="navLog">[ LOG ]</button>
     </div>
   </section>
 
-  <!-- ============ 設定画面 ============ -->
-  <section id="screen-settings" class="screen hidden">
-    <div class="settings-header">
-      <button class="iconbtn" id="settingsBack">‹</button>
-      <h2>設定</h2>
+  <!-- ============ SCAN OVERLAY ============ -->
+  <div id="scanOverlay">
+    <div class="scan-box">
+      <div class="scan-title">NETWORK SCAN</div>
+      <div id="scanLog"></div>
     </div>
-    <div class="settings-body">
+  </div>
 
-      <div class="group">
-        <div class="group-label">スライド時間</div>
-        <div class="chip-row" id="durationChips"></div>
-      </div>
-
-      <div class="group">
-        <div class="group-label">切り替え効果</div>
-        <div class="chip-row" id="transitionChips"></div>
-      </div>
-
-      <div class="group">
-        <div class="group-label">画像表示</div>
-        <div class="chip-row" id="fitChips"></div>
-      </div>
-
-      <div class="group">
-        <div class="group-label">ループ</div>
-        <div class="chip-row" id="loopChips"></div>
-      </div>
-
-      <div class="group">
-        <div class="toggle-row">
-          <span>自動再生</span>
-          <div class="toggle" id="toggleAutoplay"></div>
-        </div>
-        <div class="toggle-row">
-          <span>左右反転</span>
-          <div class="toggle" id="toggleMirror"></div>
-        </div>
-        <div class="toggle-row">
-          <span>VR表示（SBS）</span>
-          <div class="toggle" id="toggleSbs"></div>
-        </div>
-        <div class="toggle-row">
-          <span>フルスクリーン</span>
-          <div class="toggle" id="toggleFullscreen"></div>
-        </div>
-        <div class="toggle-row">
-          <span>動画の音声</span>
-          <div class="toggle" id="toggleVideoSound"></div>
-        </div>
-        <div class="toggle-row">
-          <span>視点操作（ジャイロ）</span>
-          <div class="toggle" id="toggleGaze"></div>
-        </div>
-      </div>
-
-      <p class="hint" style="text-align:left">
-        ※ 設定はこのセッション中のみ保持されます（ページを閉じるとリセットされます）。<br>
-        ※「視点操作」をONにすると、Cardboard内でも頭の動きだけで操作できます（初回に「モーションセンサーへのアクセス」許可が必要です）。普段は照準だけが表示され、視線を下に向けるとメニューが出てきます。ズレを感じたら、VR画面上部の⟳ボタン（指でタップ）でいつでも正面をリセットできます。
-      </p>
+  <!-- ============ WALK SCREEN ============ -->
+  <section id="screen-walk" class="screen">
+    <div class="hdr">
+      <div class="sub-title">WALKING RADAR</div>
+      <button class="back-btn" id="walkBack">CLOSE</button>
+    </div>
+    <div class="walk-hero">
+      <div class="walk-state" id="walkStateLbl"><span class="rec-dot"></span>STANDBY</div>
+      <div class="walk-time" id="walkTime">00:00</div>
+      <div class="tiny" id="walkIntervalLbl">INTERVAL: NORMAL (3s)</div>
+    </div>
+    <div class="walk-grid">
+      <div class="walk-card"><div class="l">DISTANCE</div><div class="v" id="walkDist">0 m</div></div>
+      <div class="walk-card"><div class="l">SAMPLES</div><div class="v" id="walkSamples">0</div></div>
+      <div class="walk-card"><div class="l">AVG QUALITY</div><div class="v" id="walkAvg">--</div></div>
+      <div class="walk-card"><div class="l">MAX / MIN</div><div class="v" id="walkMaxMin">-- / --</div></div>
+    </div>
+    <div class="walk-actions">
+      <button class="navbtn" id="btnStartWalk">[ START WALK ]</button>
+      <button class="btn-stop" id="btnStopWalk" style="display:none;">STOP WALK</button>
     </div>
   </section>
 
-  <!-- ============ VR再生画面 ============ -->
-  <section id="screen-vr" class="screen hidden">
-    <div class="vr-eyes" id="vrEyes">
-      <div class="eye fit" id="eyeLeft">
-        <canvas id="canvasLeft"></canvas>
-        <div class="gaze-reticle" id="gazeReticleLeft"></div>
-        <div class="gaze-menu" id="gazeMenuLeft">
-          <button class="gaze-btn" data-action="recenter">⟳</button>
-          <button class="gaze-btn" data-action="prev">‹‹</button>
-          <button class="gaze-btn" data-action="playpause">⏯</button>
-          <button class="gaze-btn" data-action="next">››</button>
-          <button class="gaze-btn" data-action="settings">⚙</button>
-          <button class="gaze-btn" data-action="exit">✕</button>
+  <!-- ============ MAP SCREEN ============ -->
+  <section id="screen-map" class="screen">
+    <div class="hdr">
+      <div class="sub-title">MEASURED SIGNAL QUALITY MAP</div>
+      <button class="back-btn" id="mapBack">CLOSE</button>
+    </div>
+    <div id="mapEl"></div>
+    <div class="map-legend">
+      <span><i class="legend-dot" style="background:#00FF9C;"></i>EXCELLENT/GOOD</span>
+      <span><i class="legend-dot" style="background:#FFB000;"></i>FAIR</span>
+      <span><i class="legend-dot" style="background:#FF304F;"></i>WEAK/CRITICAL</span>
+      <span><i class="legend-dot" style="background:#00CFFF;"></i>START / CURRENT</span>
+    </div>
+    <div class="tiny mt8">これは実測した通信品質のエリアです。Wi-Fi電波の物理的到達範囲を示すものではありません。</div>
+  </section>
+
+  <!-- ============ LOG SCREEN ============ -->
+  <section id="screen-log" class="screen">
+    <div class="hdr">
+      <div class="sub-title">SYSTEM LOG</div>
+      <button class="back-btn" id="logBack">CLOSE</button>
+    </div>
+    <div id="logList"></div>
+  </section>
+
+  <!-- ============ SETTINGS SCREEN ============ -->
+  <section id="screen-settings" class="screen">
+    <div class="hdr">
+      <div class="sub-title">SETTINGS</div>
+      <button class="back-btn" id="settingsBack">CLOSE</button>
+    </div>
+    <div class="settings-list">
+      <div class="setting-row">
+        <div class="lbl">SCAN INTERVAL (WALKING RADAR)</div>
+        <div class="seg" data-setting="scanInterval">
+          <button class="seg-btn" data-val="HIGH">HIGH (1s)</button>
+          <button class="seg-btn active" data-val="NORMAL">NORMAL (3s)</button>
+          <button class="seg-btn" data-val="ECO">ECO (10s)</button>
         </div>
       </div>
-      <div class="eye fit" id="eyeRight">
-        <canvas id="canvasRight"></canvas>
-        <div class="gaze-reticle" id="gazeReticleRight"></div>
-        <div class="gaze-menu" id="gazeMenuRight">
-          <button class="gaze-btn" data-action="recenter">⟳</button>
-          <button class="gaze-btn" data-action="prev">‹‹</button>
-          <button class="gaze-btn" data-action="playpause">⏯</button>
-          <button class="gaze-btn" data-action="next">››</button>
-          <button class="gaze-btn" data-action="settings">⚙</button>
-          <button class="gaze-btn" data-action="exit">✕</button>
+      <div class="setting-row">
+        <div class="lbl">SPEED TEST MODE</div>
+        <div class="seg" data-setting="speedMode">
+          <button class="seg-btn active" data-val="LIGHT">LIGHT</button>
+          <button class="seg-btn" data-val="NORMAL">NORMAL</button>
+          <button class="seg-btn" data-val="HIGH">HIGH</button>
         </div>
+      </div>
+      <div class="setting-row">
+        <div class="lbl">AUTO SCAN (MAIN SCREEN)</div>
+        <div class="seg" data-setting="autoScan">
+          <button class="seg-btn" data-val="ON">ON</button>
+          <button class="seg-btn active" data-val="OFF">OFF</button>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="lbl">SOUND</div>
+        <div class="seg" data-setting="sound">
+          <button class="seg-btn" data-val="ON">ON</button>
+          <button class="seg-btn active" data-val="OFF">OFF</button>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="lbl">HAPTIC</div>
+        <div class="seg" data-setting="haptic">
+          <button class="seg-btn active" data-val="ON">ON</button>
+          <button class="seg-btn" data-val="OFF">OFF</button>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="lbl">SIGNAL DEGRADATION ALERT THRESHOLD</div>
+        <div class="seg" data-setting="alertThreshold">
+          <button class="seg-btn" data-val="60">&lt;60%</button>
+          <button class="seg-btn active" data-val="40">&lt;40%</button>
+          <button class="seg-btn" data-val="20">&lt;20%</button>
+          <button class="seg-btn" data-val="0">OFF</button>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="lbl">EXPORT DATA</div>
+        <div class="export-btns">
+          <button class="navbtn" id="btnExportJson" style="font-size:10px;">EXPORT JSON</button>
+          <button class="navbtn" id="btnExportCsv" style="font-size:10px;">EXPORT CSV</button>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="lbl">HISTORY</div>
+        <button class="navbtn" id="btnOpenHistory" style="width:100%; font-size:10px;">VIEW SESSION HISTORY</button>
+      </div>
+      <div class="setting-row" style="border-bottom:none;">
+        <div class="tiny">DARK UI: ON (固定) / WI-FI RADAR v1.0 / このアプリは周辺Wi-Fiのスキャンや不正アクセスを行いません。</div>
       </div>
     </div>
-    <div class="eye-divider" id="eyeDivider"></div>
-    <div class="vr-spinner" id="vrSpinner"></div>
+  </section>
 
-    <div class="rotate-hint" id="rotateHint">
-      <div class="icon">↻</div>
-      <p>iPhoneを横向きにして、Cardboardにセットしてください</p>
-      <p style="text-decoration:underline; color:var(--cyan);" id="rotateSkip">向きを無視してこのまま続ける</p>
+  <!-- ============ HISTORY SCREEN ============ -->
+  <section id="screen-history" class="screen">
+    <div class="hdr">
+      <div class="sub-title">SCAN HISTORY</div>
+      <button class="back-btn" id="historyBack">CLOSE</button>
     </div>
+    <div id="historyList"></div>
+  </section>
 
-    <div class="vr-controls" id="vrControls">
-      <div class="vr-top">
-        <button class="circlebtn" id="vrClose">✕</button>
-        <span class="vr-index mono" id="vrIndex">1 / 1</span>
-        <button class="circlebtn" id="vrRecenterBtn">⟳</button>
-        <button class="circlebtn" id="vrFullscreenBtn">⛶</button>
-        <button class="circlebtn" id="vrSettingsBtn">⚙</button>
+  <!-- ============ iOS RESTRICTION SCREEN ============ -->
+  <section id="screen-ios" class="screen">
+    <div class="hdr">
+      <div class="sub-title">iOS WEB SECURITY</div>
+      <button class="back-btn" id="iosBack">CLOSE</button>
+    </div>
+    <div class="ios-box">
+      <h3>NEARBY NETWORK SCAN</h3>
+      <p>NEARBY WI-FI ACCESS POINT SCANNING IS RESTRICTED IN IOS WEB BROWSERS. NATIVE IOS SCANNER REQUIRED FOR LOW-LEVEL WI-FI INFORMATION.</p>
+      <div class="restricted-list">
+        <span class="restricted-tag">SSID</span>
+        <span class="restricted-tag">BSSID</span>
+        <span class="restricted-tag">RSSI</span>
+        <span class="restricted-tag">CHANNEL</span>
+        <span class="restricted-tag">FREQUENCY</span>
+        <span class="restricted-tag">NEARBY AP LIST</span>
       </div>
-      <div class="vr-bottom">
-        <div class="vr-playbar">
-          <button id="vrPrev">‹‹</button>
-          <button class="play" id="vrPlay">⏸</button>
-          <button id="vrNext">››</button>
-        </div>
+    </div>
+    <div class="panel">
+      <div class="panel-title"><span>WHAT THIS APP CAN MEASURE</span><span></span></div>
+      <div class="tiny" style="line-height:1.9;">
+        ・現在接続中のネットワークの通信遅延（Latency）<br>
+        ・実測ダウンロード/アップロード速度<br>
+        ・簡易的なパケットロス推定<br>
+        ・端末のGPS位置情報<br>
+        ・オンライン/オフライン状態<br><br>
+        これらの実測値から独自の QUALITY SCORE を算出します。RSSI（電波強度）とは異なる指標です。
       </div>
     </div>
   </section>
 
 </div>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-(() => {
-  'use strict';
+(function(){
+'use strict';
 
-  // ---------- 状態管理（永続化なし・メモリ内のみ） ----------
-  const state = {
-    photos: [],          // { file }  ※原本のFileだけ保持し、表示用画像は必要な分だけ都度デコードする
-    index: 0,
-    isPlaying: true,
-    timer: null,
-    hideControlsTimer: null,
-    wakeLock: null,
-    settings: {
-      duration: 5,        // 秒。-1 = 手動
-      transition: 'fade',
-      fit: 'fit',
-      loop: 'infinite',
-      autoplay: true,
-      mirror: false,
-      sbs: true,
-      fullscreen: true,
-      videoSound: false,
-      gazeControl: false
-    }
-  };
+/* ==========================================================================
+   0. CONSTANTS
+   ========================================================================== */
+const INTERVAL_MS = { HIGH:1000, NORMAL:3000, ECO:10000 };
+const SPEED_TEST_FILES = {
+  // Files served with permissive CORS from a public CDN, used only to
+  // measure real transfer time. Size is approximate.
+  LIGHT:  { url:'https://cdn.jsdelivr.net/npm/jquery@3.6.4/dist/jquery.min.js', approxKB:88 },
+  NORMAL: { url:'https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.module.js', approxKB:620 },
+  HIGH:   { url:'https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.js', approxKB:1200 }
+};
+const PING_URL = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+const UPLOAD_URL = 'https://httpbin.org/post';
+const UPLOAD_SIZES = { LIGHT: 40*1024, NORMAL: 120*1024, HIGH: 350*1024 };
+const MAX_LOG_LINES = 500;
+const GRAPH_MAX_SAMPLES = 120;
 
-  // 大量の写真（100〜200枚超）でも処理落ちしないよう、
-  // 現在表示中の画像の前後数枚だけをダウンサンプリングしてデコード・保持するウィンドウ式キャッシュ
-  const WINDOW_RADIUS = 2;
-  const decodeCache = new Map();     // index -> ImageBitmap
-  const decodePromises = new Map();  // index -> Promise（重複デコード防止）
-  let renderToken = 0;               // 連打・高速ナビゲーション時に古い描画が後から上書きしないようにするトークン
+/* ==========================================================================
+   1. STATE
+   ========================================================================== */
+const S = {
+  online: navigator.onLine,
+  settings: { scanInterval:'NORMAL', speedMode:'LIGHT', autoScan:'OFF', sound:'OFF', haptic:'ON', alertThreshold:40 },
+  metrics: { latency:null, download:null, upload:null, packetLoss:null, quality:null },
+  location: { lat:null, lon:null, accuracy:null, altitude:null, heading:null, speed:null, available:false },
+  network: { type:'N/A', downlinkHint:'N/A', rttHint:'N/A', ssid:'N/A', rssi:'N/A' },
+  graphData: { quality:[], latency:[], download:[], upload:[] },
+  currentGraph: 'quality',
+  scanning: false,
+  walk: { active:false, startTime:0, timerId:null, watchId:null, distance:0, samples:[], lastPos:null, path:[], qualities:[] },
+  currentSessionId: null,
+  logLines: [],
+  radarAngle: 0,
+  radarSweeping: false,
+  compassHeading: null,
+  compassAvailable: false,
+  dirStats: {}, // sector index (0-15) -> { sum, count }
+};
 
-  const $ = (id) => document.getElementById(id);
-
-  // ---------- 画面切り替え ----------
-  function showScreen(id){
-    document.querySelectorAll('.screen').forEach(el => el.classList.add('hidden'));
-    $(id).classList.remove('hidden');
+/* ==========================================================================
+   2. UTIL
+   ========================================================================== */
+function pad2(n){ return String(n).padStart(2,'0'); }
+function nowStr(){
+  const d = new Date();
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+function fmtDate(ts){
+  const d = new Date(ts);
+  return `${pad2(d.getMonth()+1)}/${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+function haversine(lat1,lon1,lat2,lon2){
+  const R = 6371000;
+  const toRad = x => x*Math.PI/180;
+  const dLat = toRad(lat2-lat1), dLon = toRad(lon2-lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  return R * 2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+function vibrate(pattern){
+  if (S.settings.haptic==='ON' && 'vibrate' in navigator){
+    try{ navigator.vibrate(pattern); }catch(e){}
   }
+}
+function beep(freq=880, dur=0.08, type='sine', vol=0.05){
+  if (S.settings.sound!=='ON') return;
+  try{
+    const ctx = beep._ctx || (beep._ctx = new (window.AudioContext||window.webkitAudioContext)());
+    const osc = ctx.createOscillator(), gain = ctx.createGain();
+    osc.type = type; osc.frequency.value = freq;
+    gain.gain.value = vol;
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start();
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+dur);
+    osc.stop(ctx.currentTime+dur+0.02);
+  }catch(e){}
+}
+function log(msg){
+  const line = `[${nowStr()}] ${msg}`;
+  S.logLines.unshift(line);
+  if (S.logLines.length > MAX_LOG_LINES) S.logLines.pop();
+  renderLog();
+}
+function showToast(msg){
+  const el = document.getElementById('alertToast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(()=>el.classList.remove('show'), 3500);
+}
 
-  // ---------- ホーム画面：写真選択 ----------
-  let appendMode = false; // true の間は「追加で選ぶ」による選択として既存に足す
-
-  $('addMoreBtn').addEventListener('click', () => {
-    appendMode = true;
-    $('fileInput').click();
-  });
-
-  $('fileInput').addEventListener('change', (e) => {
-    const files = Array.from(e.target.files || []);
-    e.target.value = ''; // 同じファイルを続けて選べるようにリセット
-    if (files.length === 0) { appendMode = false; return; }
-
-    if (appendMode){
-      state.photos = state.photos.concat(files.map(f => ({ file: f })));
-    } else {
-      // 新規選択：前回選択分のデコード済み画像があれば破棄
-      clearDecodeCache();
-      state.photos = files.map(f => ({ file: f }));
-      state.index = 0;
-    }
-    appendMode = false;
-
-    updateHomeUI();
-  });
-
-  $('clearSelection').addEventListener('click', () => {
-    clearDecodeCache();
-    state.photos = [];
-    state.index = 0;
-    updateHomeUI();
-  });
-
-  function updateHomeUI(){
-    const count = state.photos.length;
-    $('countLabel').textContent = count + '枚';
-    $('startBtn').disabled = count === 0;
-    $('pickLabel').textContent = count === 0 ? '写真を選択' : '写真を選び直す';
-    $('addMoreBtn').style.display = count === 0 ? 'none' : 'flex';
-    $('clearHint').style.display = count === 0 ? 'none' : 'block';
+/* ==========================================================================
+   3. INDEXEDDB
+   ========================================================================== */
+const DB = (function(){
+  let dbp = null;
+  function open(){
+    if (dbp) return dbp;
+    dbp = new Promise((resolve, reject)=>{
+      if (!('indexedDB' in window)){ reject('no-idb'); return; }
+      const req = indexedDB.open('wifiRadarDB', 2);
+      req.onupgradeneeded = (e)=>{
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('sessions')) db.createObjectStore('sessions',{keyPath:'id', autoIncrement:true});
+        if (!db.objectStoreNames.contains('samples')) {
+          const st = db.createObjectStore('samples',{keyPath:'id', autoIncrement:true});
+          st.createIndex('sessionId','sessionId',{unique:false});
+        }
+        if (!db.objectStoreNames.contains('settings')) db.createObjectStore('settings',{keyPath:'key'});
+        if (!db.objectStoreNames.contains('headingSamples')) db.createObjectStore('headingSamples',{keyPath:'id', autoIncrement:true});
+      };
+      req.onsuccess = (e)=>resolve(e.target.result);
+      req.onerror = ()=>reject(req.error);
+    });
+    return dbp;
   }
-
-  $('startBtn').addEventListener('click', startVR);
-  $('settingsBtn').addEventListener('click', () => showScreen('screen-settings'));
-  $('settingsBack').addEventListener('click', () => showScreen('screen-home'));
-  $('vrSettingsBtn').addEventListener('click', () => showScreen('screen-settings'));
-
-  // ---------- 設定：Chip UI ----------
-  function buildChips(containerId, options, currentValue, onSelect){
-    const container = $(containerId);
-    container.innerHTML = '';
-    options.forEach(opt => {
-      const chip = document.createElement('div');
-      chip.className = 'chip' + (opt.value === currentValue ? ' active' : '');
-      chip.textContent = opt.label;
-      chip.addEventListener('click', () => {
-        onSelect(opt.value);
-        [...container.children].forEach(c => c.classList.remove('active'));
-        chip.classList.add('active');
+  async function add(store, val){
+    try{
+      const db = await open();
+      return new Promise((res,rej)=>{
+        const tx = db.transaction(store,'readwrite');
+        const r = tx.objectStore(store).add(val);
+        r.onsuccess = ()=>res(r.result);
+        r.onerror = ()=>rej(r.error);
       });
-      container.appendChild(chip);
-    });
+    }catch(e){ return null; }
   }
-
-  function renderSettings(){
-    buildChips('durationChips',
-      [1,2,3,5,10,15,30,-1].map(v => ({ value:v, label: v === -1 ? '手動' : v + '秒' })),
-      state.settings.duration,
-      (v) => { state.settings.duration = v; restartTimer(); }
-    );
-    buildChips('transitionChips',
-      [{value:'none',label:'なし'},{value:'fade',label:'フェード'}],
-      state.settings.transition,
-      (v) => state.settings.transition = v
-    );
-    buildChips('fitChips',
-      [{value:'fit',label:'Fit'},{value:'fill',label:'Fill'}],
-      state.settings.fit,
-      (v) => { state.settings.fit = v; applyEyeMode(); }
-    );
-    buildChips('loopChips',
-      [{value:'infinite',label:'無限'},{value:'once',label:'1回'},{value:'pingpong',label:'往復'}],
-      state.settings.loop,
-      (v) => state.settings.loop = v
-    );
-
-    setToggle('toggleAutoplay', state.settings.autoplay, (v) => {
-      state.settings.autoplay = v;
-      state.isPlaying = v;
-      restartTimer();
-      updatePlayIcon();
-    });
-    setToggle('toggleMirror', state.settings.mirror, (v) => {
-      state.settings.mirror = v;
-      applyEyeMode();
-    });
-    setToggle('toggleSbs', state.settings.sbs, (v) => {
-      state.settings.sbs = v;
-      applyEyeMode();
-    });
-    setToggle('toggleFullscreen', state.settings.fullscreen, (v) => {
-      state.settings.fullscreen = v;
-    });
-    setToggle('toggleVideoSound', state.settings.videoSound, (v) => {
-      state.settings.videoSound = v;
-      if (activeVideoEl) activeVideoEl.muted = !v;
-    });
-    setToggle('toggleGaze', state.settings.gazeControl, (v) => {
-      state.settings.gazeControl = v;
-      const inVR = !$('screen-vr').classList.contains('hidden');
-      if (inVR){
-        if (v) enableGazeControlIfPermitted();
-        else stopGazeTracking();
-      }
-    });
-  }
-
-  function setToggle(id, value, onChange){
-    const el = $(id);
-    el.classList.toggle('on', value);
-    el.onclick = () => {
-      const newVal = !el.classList.contains('on');
-      el.classList.toggle('on', newVal);
-      onChange(newVal);
-    };
-  }
-
-  // ---------- VR再生 ----------
-  async function startVR(){
-    if (state.photos.length === 0) return;
-    state.index = 0;
-    state.isPlaying = state.settings.autoplay;
-    showScreen('screen-vr');
-    setupCanvasSizes();
-    drawCurrentToCanvases();
-    if (state.settings.fullscreen) requestFullscreenIfPossible();
-    requestWakeLock();
-    checkOrientation();
-    restartTimer();
-    flashControls();
-    updatePlayIcon();
-    if (state.settings.gazeControl) await enableGazeControlIfPermitted();
-  }
-
-  function stopVR(){
-    clearInterval(state.timer);
-    state.timer = null;
-    releaseWakeLock();
-    exitFullscreenIfPossible();
-    clearDecodeCache();
-    stopActiveVideo();
-    stopGazeTracking();
-    showScreen('screen-home');
-  }
-  $('vrClose').addEventListener('click', stopVR);
-
-  function applyEyeMode(){
-    $('eyeRight').style.display = state.settings.sbs ? 'flex' : 'none';
-    $('eyeDivider').style.display = state.settings.sbs ? 'block' : 'none';
-    setupCanvasSizes();
-    drawCurrentToCanvases();
-  }
-
-  // ---------- 画像のダウンサンプリング付き遅延デコード ----------
-
-  function targetDecodeWidth(){
-    // 表示先(片目分)の実ピクセル幅を基準にダウンサンプリング。
-    // devicePixelRatioは2倍までに制限し、過剰な高解像度デコードを避ける。
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const eyeCssWidth = state.settings.sbs ? window.innerWidth / 2 : window.innerWidth;
-    return Math.max(480, Math.round(eyeCssWidth * dpr));
-  }
-
-  function decodeIndex(idx){
-    if (decodeCache.has(idx) || decodePromises.has(idx)) return decodePromises.get(idx);
-    const entry = state.photos[idx];
-    if (!entry || isVideoEntry(entry)) return Promise.resolve(); // 動画はここでは扱わない
-
-    const width = targetDecodeWidth();
-    const p = createImageBitmap(entry.file, { resizeWidth: width, resizeQuality: 'medium' })
-      .catch(() => createImageBitmap(entry.file)) // resizeオプション非対応環境へのフォールバック
-      .then(bitmap => {
-        decodeCache.set(idx, bitmap);
-        decodePromises.delete(idx);
-        return bitmap;
-      })
-      .catch(() => { decodePromises.delete(idx); });
-
-    decodePromises.set(idx, p);
-    return p;
-  }
-
-  function updateDecodeWindow(){
-    const total = state.photos.length;
-    if (total === 0) return;
-    const keep = new Set();
-    for (let off = -WINDOW_RADIUS; off <= WINDOW_RADIUS; off++){
-      const idx = ((state.index + off) % total + total) % total;
-      keep.add(idx);
-      decodeIndex(idx);
-    }
-    // ウィンドウ外に出た画像はメモリから解放
-    for (const [idx, bitmap] of decodeCache){
-      if (!keep.has(idx)){
-        bitmap.close && bitmap.close();
-        decodeCache.delete(idx);
-      }
-    }
-  }
-
-  function clearDecodeCache(){
-    decodeCache.forEach(bitmap => bitmap.close && bitmap.close());
-    decodeCache.clear();
-    decodePromises.clear();
-  }
-
-  function setupCanvasSizes(){
-    [$('canvasLeft'), $('canvasRight')].forEach(canvas => {
-      const rect = canvas.parentElement.getBoundingClientRect();
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const w = Math.max(1, Math.round(rect.width * dpr));
-      const h = Math.max(1, Math.round(rect.height * dpr));
-      if (canvas.width !== w) canvas.width = w;
-      if (canvas.height !== h) canvas.height = h;
-    });
-  }
-
-  function drawBitmapOnCanvas(canvas, source){
-    const ctx = canvas.getContext('2d');
-    const cw = canvas.width, ch = canvas.height;
-    ctx.clearRect(0, 0, cw, ch);
-    if (!source) return;
-
-    // ImageBitmap は width/height、HTMLVideoElement は videoWidth/videoHeight を持つ
-    const bw = source.videoWidth || source.width;
-    const bh = source.videoHeight || source.height;
-    if (!bw || !bh) return;
-
-    const scale = state.settings.fit === 'fill'
-      ? Math.max(cw / bw, ch / bh)   // Fill: 画面を埋める（はみ出た分はクロップ）
-      : Math.min(cw / bw, ch / bh);  // Fit: 画面内に収める（レターボックス）
-    const dw = bw * scale, dh = bh * scale;
-    const dx = (cw - dw) / 2, dy = (ch - dh) / 2;
-
-    ctx.save();
-    if (state.settings.mirror){
-      ctx.translate(cw, 0);
-      ctx.scale(-1, 1);
-      ctx.drawImage(source, cw - dx - dw, dy, dw, dh);
-    } else {
-      ctx.drawImage(source, dx, dy, dw, dh);
-    }
-    ctx.restore();
-  }
-
-  // ---------- 動画再生 ----------
-  let activeVideoEl = null;
-  let activeVideoIndex = -1;
-  let videoRafId = null;
-
-  function isVideoEntry(entry){
-    return !!(entry && entry.file && entry.file.type.startsWith('video/'));
-  }
-
-  function stopActiveVideo(){
-    if (videoRafId){ cancelAnimationFrame(videoRafId); videoRafId = null; }
-    if (activeVideoEl){
-      activeVideoEl.pause();
-      if (activeVideoEl.src) URL.revokeObjectURL(activeVideoEl.src);
-      activeVideoEl.removeAttribute('src');
-      activeVideoEl.load();
-      activeVideoEl.remove();
-      activeVideoEl = null;
-    }
-    activeVideoIndex = -1;
-  }
-
-  function videoDrawLoop(){
-    if (!activeVideoEl) return;
-    drawBitmapOnCanvas($('canvasLeft'), activeVideoEl);
-    if (state.settings.sbs) drawBitmapOnCanvas($('canvasRight'), activeVideoEl);
-    videoRafId = requestAnimationFrame(videoDrawLoop);
-  }
-
-  function playVideoEntry(idx, entry){
-    if (activeVideoIndex === idx && activeVideoEl) return; // 既に再生中
-    stopActiveVideo();
-
-    const video = document.createElement('video');
-    video.playsInline = true;
-    video.muted = !state.settings.videoSound;
-    video.loop = true; // スライド時間内はループ再生。手動送りで次へ進める
-    video.preload = 'auto';
-    video.style.position = 'fixed';
-    video.style.left = '-9999px';
-    video.style.width = '1px';
-    video.style.height = '1px';
-    video.style.opacity = '0';
-    document.body.appendChild(video);
-
-    const url = URL.createObjectURL(entry.file);
-    video.src = url;
-    activeVideoEl = video;
-    activeVideoIndex = idx;
-
-    $('vrSpinner').classList.add('show');
-    video.addEventListener('loadeddata', () => {
-      if (activeVideoEl !== video) return; // その間に切り替わっていたら無視
-      $('vrSpinner').classList.remove('show');
-      const canvasLeft = $('canvasLeft'), canvasRight = $('canvasRight');
-      canvasLeft.style.opacity = 1;
-      canvasRight.style.opacity = 1;
-      if (state.isPlaying) video.play().catch(() => {});
-      videoDrawLoop();
-    }, { once:true });
-  }
-
-
-  async function drawCurrentToCanvases(){
-    const idx = state.index;
-    const total = state.photos.length;
-    if (total === 0) return;
-
-    const entry = state.photos[idx];
-
-    if (isVideoEntry(entry)){
-      updateDecodeWindow(); // 前後の写真デコードは継続（写真と動画が混在する場合に備える）
-      playVideoEntry(idx, entry);
-      $('vrIndex').textContent = (idx + 1) + ' / ' + total;
-      return;
-    }
-
-    // 写真エントリに切り替わった場合は再生中の動画を止める
-    stopActiveVideo();
-
-    const myToken = ++renderToken;
-    updateDecodeWindow();
-
-    let bitmap = decodeCache.get(idx);
-    if (!bitmap){
-      $('vrSpinner').classList.add('show');
-      await decodeIndex(idx);
-      bitmap = decodeCache.get(idx);
-      $('vrSpinner').classList.remove('show');
-    }
-    if (myToken !== renderToken) return; // その間に別のメディアへ移動していたら描画しない
-
-    const canvasLeft = $('canvasLeft'), canvasRight = $('canvasRight');
-
-    const paint = () => {
-      drawBitmapOnCanvas(canvasLeft, bitmap);
-      if (state.settings.sbs) drawBitmapOnCanvas(canvasRight, bitmap);
-    };
-
-    if (state.settings.transition === 'fade'){
-      canvasLeft.style.opacity = 0;
-      canvasRight.style.opacity = 0;
-      paint();
-      requestAnimationFrame(() => {
-        canvasLeft.style.opacity = 1;
-        canvasRight.style.opacity = 1;
+  async function put(store, val){
+    try{
+      const db = await open();
+      return new Promise((res,rej)=>{
+        const tx = db.transaction(store,'readwrite');
+        const r = tx.objectStore(store).put(val);
+        r.onsuccess = ()=>res(r.result);
+        r.onerror = ()=>rej(r.error);
       });
-    } else {
-      paint();
-      canvasLeft.style.opacity = 1;
-      canvasRight.style.opacity = 1;
+    }catch(e){ return null; }
+  }
+  async function getAll(store){
+    try{
+      const db = await open();
+      return new Promise((res,rej)=>{
+        const tx = db.transaction(store,'readonly');
+        const r = tx.objectStore(store).getAll();
+        r.onsuccess = ()=>res(r.result||[]);
+        r.onerror = ()=>rej(r.error);
+      });
+    }catch(e){ return []; }
+  }
+  async function getByIndex(store, index, val){
+    try{
+      const db = await open();
+      return new Promise((res,rej)=>{
+        const tx = db.transaction(store,'readonly');
+        const r = tx.objectStore(store).index(index).getAll(val);
+        r.onsuccess = ()=>res(r.result||[]);
+        r.onerror = ()=>rej(r.error);
+      });
+    }catch(e){ return []; }
+  }
+  return { add, put, getAll, getByIndex };
+})();
+
+async function loadSettings(){
+  const rows = await DB.getAll('settings');
+  rows.forEach(r=>{ if (r && r.key) S.settings[r.key] = r.value; });
+  applySettingsToUI();
+}
+async function saveSetting(key, value){
+  S.settings[key] = value;
+  await DB.put('settings', { key, value });
+}
+
+/* ==========================================================================
+   4. NETWORK INFORMATION (best-effort hints, never fabricated)
+   ========================================================================== */
+function updateNetworkInfoHints(){
+  const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  if (conn){
+    S.network.type = (conn.effectiveType || conn.type || 'N/A').toUpperCase();
+    S.network.downlinkHint = (typeof conn.downlink === 'number') ? `${conn.downlink} Mbps (EST)` : 'N/A';
+    S.network.rttHint = (typeof conn.rtt === 'number') ? `${conn.rtt} ms (EST)` : 'N/A';
+  } else {
+    S.network.type = 'N/A'; S.network.downlinkHint = 'N/A'; S.network.rttHint = 'N/A';
+  }
+  // SSID / BSSID / RSSI are never available to iOS Safari web apps.
+  S.network.ssid = 'N/A'; S.network.rssi = 'N/A';
+  renderNetworkPanel();
+}
+
+/* ==========================================================================
+   5. MEASUREMENT ENGINE — latency / download / upload / packet loss
+   ========================================================================== */
+async function measureLatencyOnce(){
+  const t0 = performance.now();
+  try{
+    await fetch(PING_URL + '?_=' + Math.random(), { method:'HEAD', cache:'no-store', mode:'no-cors' });
+    return performance.now() - t0;
+  }catch(e){
+    return null;
+  }
+}
+async function measureLatency(samples=4){
+  const results = [];
+  for (let i=0;i<samples;i++){
+    const t = await measureLatencyOnce();
+    if (t !== null) results.push(t);
+  }
+  const loss = ((samples - results.length) / samples) * 100;
+  if (results.length === 0) return { latency:null, packetLoss: samples>0 ? 100 : null };
+  results.sort((a,b)=>a-b);
+  const median = results[Math.floor(results.length/2)];
+  return { latency: Math.round(median), packetLoss: Math.round(loss*10)/10 };
+}
+async function measureDownload(mode){
+  const file = SPEED_TEST_FILES[mode] || SPEED_TEST_FILES.LIGHT;
+  try{
+    const t0 = performance.now();
+    const res = await fetch(file.url + '?_=' + Math.random(), { cache:'no-store' });
+    const blob = await res.blob();
+    const dt = (performance.now() - t0) / 1000;
+    if (dt <= 0 || blob.size === 0) return null;
+    const mbps = (blob.size * 8) / (dt * 1_000_000);
+    return Math.round(mbps * 10) / 10;
+  }catch(e){
+    return null;
+  }
+}
+async function measureUpload(mode){
+  const size = UPLOAD_SIZES[mode] || UPLOAD_SIZES.LIGHT;
+  try{
+    const data = new Blob([new Uint8Array(size)]);
+    const t0 = performance.now();
+    await fetch(UPLOAD_URL, { method:'POST', body:data, mode:'cors' });
+    const dt = (performance.now() - t0) / 1000;
+    if (dt <= 0) return null;
+    const mbps = (size * 8) / (dt * 1_000_000);
+    return Math.round(mbps * 10) / 10;
+  }catch(e){
+    return null;
+  }
+}
+
+/* Quality score: derived only from metrics that were actually obtained. */
+function computeQualityScore(m){
+  const parts = [];
+  if (typeof m.latency === 'number'){
+    let s = 100 - (m.latency/2);
+    parts.push(Math.max(0, Math.min(100, s)));
+  }
+  if (typeof m.packetLoss === 'number'){
+    parts.push(Math.max(0, 100 - m.packetLoss*4));
+  }
+  if (typeof m.download === 'number'){
+    parts.push(Math.min(100, (m.download/80)*100));
+  }
+  if (typeof m.upload === 'number'){
+    parts.push(Math.min(100, (m.upload/25)*100));
+  }
+  if (parts.length === 0) return null;
+  const avg = parts.reduce((a,b)=>a+b,0) / parts.length;
+  return Math.round(Math.max(0, Math.min(100, avg)));
+}
+function qualityTag(score){
+  if (score === null) return { tag:'N/A', color:'var(--text-dim)' };
+  if (score >= 90) return { tag:'EXCELLENT', color:'var(--main)' };
+  if (score >= 75) return { tag:'GOOD', color:'var(--main)' };
+  if (score >= 50) return { tag:'FAIR', color:'var(--warn)' };
+  if (score >= 30) return { tag:'WEAK', color:'var(--warn)' };
+  return { tag:'CRITICAL', color:'var(--danger)' };
+}
+function latencyTag(ms){
+  if (ms===null) return 'N/A';
+  if (ms<=30) return 'EXCELLENT';
+  if (ms<=60) return 'GOOD';
+  if (ms<=100) return 'FAIR';
+  if (ms<=200) return 'WEAK';
+  return 'CRITICAL';
+}
+
+/* ==========================================================================
+   6. FULL SCAN SEQUENCE (SCAN button + used silently during WALK)
+   ========================================================================== */
+async function runFullScan(opts={}){
+  const silent = !!opts.silent;
+  if (S.scanning) return null;
+  S.scanning = true;
+  if (!silent) openScanOverlay();
+
+  const steps = silent ? [] : [
+    'INITIALIZING RADAR...','LOCATION LOCK...','NETWORK LINK...',
+    'SIGNAL ANALYSIS...','MEASURING LATENCY...','MEASURING THROUGHPUT...'
+  ];
+  if (!silent) await playScanLog(steps);
+
+  if (!silent) setRadarSweeping(true);
+  log('SCAN STARTED');
+
+  if (!navigator.onLine){
+    log('NETWORK OFFLINE — SPEED TEST SKIPPED');
+    S.metrics = { latency:null, download:null, upload:null, packetLoss:null, quality:null };
+    updateMetricsUI();
+    if (!silent){ await playScanLog(['NETWORK OFFLINE','ANALYSIS COMPLETE']); closeScanOverlay(); setRadarSweeping(false); }
+    S.scanning = false;
+    return S.metrics;
+  }
+
+  const { latency, packetLoss } = await measureLatency(4);
+  S.metrics.latency = latency;
+  S.metrics.packetLoss = packetLoss;
+  log(latency!==null ? `LATENCY ${latency}ms` : 'LATENCY MEASUREMENT FAILED');
+
+  const download = await measureDownload(S.settings.speedMode);
+  S.metrics.download = download;
+  log(download!==null ? `DOWNLOAD ${download}Mbps` : 'DOWNLOAD TEST FAILED');
+
+  const upload = await measureUpload(S.settings.speedMode);
+  S.metrics.upload = upload;
+  log(upload!==null ? `UPLOAD ${upload}Mbps` : 'UPLOAD TEST FAILED');
+
+  S.metrics.quality = computeQualityScore(S.metrics);
+  log(S.metrics.quality!==null ? `QUALITY ${S.metrics.quality}%` : 'QUALITY N/A');
+  recordDirectionalSample(S.metrics.quality);
+
+  updateMetricsUI();
+  pushGraphSample();
+  checkDegradationAlert();
+
+  if (!silent){
+    await playScanLog(['ANALYSIS COMPLETE']);
+    closeScanOverlay();
+    setRadarSweeping(false);
+    beep(1200,0.08,'square',0.04);
+    vibrate(15);
+  }
+  S.scanning = false;
+  return S.metrics;
+}
+
+function openScanOverlay(){ document.getElementById('scanOverlay').classList.add('active'); document.getElementById('scanLog').innerHTML=''; }
+function closeScanOverlay(){ document.getElementById('scanOverlay').classList.remove('active'); }
+function playScanLog(steps){
+  return new Promise(resolve=>{
+    const el = document.getElementById('scanLog');
+    let i = 0;
+    function next(){
+      if (i>=steps.length){ resolve(); return; }
+      const d = document.createElement('div');
+      d.innerHTML = `<span>&gt;</span> ${steps[i]}`;
+      el.prepend(d);
+      i++;
+      setTimeout(next, 340);
     }
+    next();
+  });
+}
 
-    $('vrIndex').textContent = (idx + 1) + ' / ' + total;
+/* ==========================================================================
+   7. GEOLOCATION
+   ========================================================================== */
+let geoWatchId = null;
+function startGeoWatch(){
+  if (!('geolocation' in navigator)){
+    S.location.available = false;
+    renderLocationPanel('FEATURE NOT AVAILABLE');
+    return;
   }
-
-  function advance(forward, userInitiated){
-    if (state.photos.length === 0) return;
-    let next = state.index + (forward ? 1 : -1);
-
-    if (state.settings.loop === 'infinite'){
-      next = (next + state.photos.length) % state.photos.length;
-    } else if (state.settings.loop === 'once'){
-      if (next < 0 || next >= state.photos.length){
-        state.isPlaying = false;
-        clearInterval(state.timer);
-        updatePlayIcon();
-        return;
-      }
-    } else if (state.settings.loop === 'pingpong'){
-      if (next >= state.photos.length) next = Math.max(0, state.photos.length - 2);
-      if (next < 0) next = Math.min(state.photos.length - 1, 1);
-    }
-
-    state.index = next;
-    drawCurrentToCanvases();
-    if (userInitiated){ restartTimer(); flashControls(); }
-  }
-  $('vrPrev').addEventListener('click', () => advance(false, true));
-  $('vrNext').addEventListener('click', () => advance(true, true));
-
-  function togglePlay(){
-    state.isPlaying = !state.isPlaying;
-    updatePlayIcon();
-    restartTimer();
-    flashControls();
-    if (activeVideoEl){
-      if (state.isPlaying) activeVideoEl.play().catch(() => {});
-      else activeVideoEl.pause();
-    }
-  }
-  $('vrPlay').addEventListener('click', togglePlay);
-
-  function updatePlayIcon(){
-    $('vrPlay').textContent = state.isPlaying ? '⏸' : '▶';
-  }
-
-  function restartTimer(){
-    clearInterval(state.timer);
-    state.timer = null;
-    if (!state.isPlaying || state.settings.duration === -1) return;
-    state.timer = setInterval(() => advance(true, false), state.settings.duration * 1000);
-  }
-
-  // ---------- 視点操作（ジャイロ / dwellクリック） ----------
-  const gaze = {
-    active:false,
-    x:0.5, y:0.5,               // 実際に描画・判定に使う照準位置（スムージング後）
-    targetX:0.5, targetY:0.5,   // センサーから算出した目標位置（スムージング前）
-    baseline:{ beta:0, gamma:0 }, // recenter基準
-    dwellTarget:null,
-    dwellStart:0,
-    menuVisible:false
+  geoWatchId = navigator.geolocation.watchPosition(onGeoSuccess, onGeoError, {
+    enableHighAccuracy:true, maximumAge:2000, timeout:10000
+  });
+}
+function onGeoSuccess(pos){
+  const c = pos.coords;
+  S.location = {
+    lat:c.latitude, lon:c.longitude, accuracy:c.accuracy,
+    altitude: (c.altitude!==null && c.altitude!==undefined) ? Math.round(c.altitude) : null,
+    heading: (c.heading!==null && c.heading!==undefined && !isNaN(c.heading)) ? Math.round(c.heading) : null,
+    speed: (c.speed!==null && c.speed!==undefined) ? (c.speed*3.6) : null,
+    available:true
   };
-  let lastOrientation = { beta:0, gamma:0 };
-  let gazeRafId = null;
-  const GAZE_SENSITIVITY = 0.007; // 値を下げるほど、同じ首振り量に対する移動量が小さくなり狙いやすくなる
-  const GAZE_SMOOTHING = 0.16;    // 0〜1。小さいほど滑らかだが反応は遅くなる
-  const DWELL_MS = 1100;
-  const MENU_SHOW_Y = 0.74; // 視線がこれより下に入るとメニューを表示
-  const MENU_HIDE_Y = 0.58; // これより上に戻ると隠す（ヒステリシスでチラつき防止）
+  renderLocationPanel();
+  if (S.walk.active) handleWalkPosition(pos);
+}
+function onGeoError(err){
+  S.location.available = false;
+  if (err.code === 1) renderLocationPanel('LOCATION ACCESS DENIED');
+  else renderLocationPanel('LOCATION UNAVAILABLE');
+}
 
-  async function enableGazeControlIfPermitted(){
-    try {
-      if (typeof DeviceOrientationEvent !== 'undefined' &&
-          typeof DeviceOrientationEvent.requestPermission === 'function'){
-        const result = await DeviceOrientationEvent.requestPermission();
-        if (result !== 'granted'){ state.settings.gazeControl = false; return; }
+/* ==========================================================================
+   7b. COMPASS (device orientation) — direction-based real-data overlay
+   ========================================================================== */
+const SECTORS = 16; // 22.5 degrees each
+function headingToSector(h){ return Math.floor(((h % 360) + 360) % 360 / (360/SECTORS)) % SECTORS; }
+function sectorCenterDeg(i){ return i * (360/SECTORS); }
+function compassLabel(h){
+  const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+  return dirs[headingToSector(h)];
+}
+function onDeviceOrientation(e){
+  let heading = null;
+  if (typeof e.webkitCompassHeading === 'number' && !isNaN(e.webkitCompassHeading)){
+    heading = e.webkitCompassHeading; // iOS Safari: 0 = North, clockwise, already device-facing direction
+  } else if (e.absolute && typeof e.alpha === 'number'){
+    heading = (360 - e.alpha) % 360; // best-effort approximation on non-iOS browsers
+  }
+  if (heading === null || isNaN(heading)) return;
+  S.compassHeading = heading;
+  S.compassAvailable = true;
+  updateDirReadout();
+}
+async function initCompass(){
+  try{
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
+      const state = await DeviceOrientationEvent.requestPermission();
+      if (state === 'granted'){
+        window.addEventListener('deviceorientation', onDeviceOrientation, true);
+      } else {
+        log('COMPASS ACCESS DENIED');
       }
-      startGazeTracking();
-    } catch(e){
-      state.settings.gazeControl = false;
+    } else if ('DeviceOrientationEvent' in window){
+      window.addEventListener('deviceorientation', onDeviceOrientation, true);
+    } else {
+      log('COMPASS: FEATURE NOT AVAILABLE');
     }
+  }catch(e){
+    log('COMPASS: FEATURE NOT AVAILABLE');
   }
+}
+function updateDirReadout(){
+  const h = S.compassHeading;
+  const headingTxt = document.getElementById('dirHeadingTxt');
+  const sectorTxt = document.getElementById('dirSectorTxt');
+  if (h===null){ headingTxt.textContent = 'HEADING: N/A'; sectorTxt.textContent = 'SECTOR AVG: N/A'; return; }
+  headingTxt.textContent = `HEADING: ${Math.round(h)}° ${compassLabel(h)}`;
+  const idx = headingToSector(h);
+  const st = S.dirStats[idx];
+  sectorTxt.textContent = st && st.count ? `SECTOR AVG: ${Math.round(st.sum/st.count)}% (n=${st.count})` : 'SECTOR AVG: NO DATA YET';
+}
+async function loadDirStats(){
+  const rows = await DB.getAll('headingSamples');
+  const stats = {};
+  rows.forEach(r=>{
+    if (typeof r.heading !== 'number' || typeof r.quality !== 'number') return;
+    const idx = headingToSector(r.heading);
+    if (!stats[idx]) stats[idx] = { sum:0, count:0 };
+    stats[idx].sum += r.quality; stats[idx].count += 1;
+  });
+  S.dirStats = stats;
+  updateDirReadout();
+}
+function recordDirectionalSample(quality){
+  if (S.compassHeading===null || typeof quality !== 'number') return;
+  const heading = S.compassHeading;
+  const idx = headingToSector(heading);
+  if (!S.dirStats[idx]) S.dirStats[idx] = { sum:0, count:0 };
+  S.dirStats[idx].sum += quality; S.dirStats[idx].count += 1;
+  DB.add('headingSamples', { heading, quality, timestamp:Date.now() });
+  updateDirReadout();
+}
 
-  function onDeviceOrientation(e){
-    lastOrientation = { beta: e.beta || 0, gamma: e.gamma || 0 };
-    const angle = (screen.orientation && screen.orientation.angle) || 0;
-    const flip = (angle === 90) ? 1 : -1; // landscape-primary / secondary で軸符号が反転する
-    const dx = flip * (lastOrientation.beta  - gaze.baseline.beta);
-    const dy = flip * (lastOrientation.gamma - gaze.baseline.gamma);
-    gaze.targetX = clamp01(0.5 + dx * GAZE_SENSITIVITY);
-    gaze.targetY = clamp01(0.5 - dy * GAZE_SENSITIVITY);
-  }
-  function clamp01(v){ return Math.max(0, Math.min(1, v)); }
+/* ==========================================================================
+   8. WALKING RADAR (recording session)
+   ========================================================================== */
+function startWalk(){
+  S.walk = { active:true, startTime:Date.now(), timerId:null, distance:0, samples:[], lastPos:null, path:[], qualities:[] };
+  DB.add('sessions', { start:S.walk.startTime, end:null, distance:0, samples:0, avgQuality:null, maxQuality:null, minQuality:null })
+    .then(id=>{ S.currentSessionId = id; });
 
-  function recenterGaze(){
-    gaze.baseline = { beta: lastOrientation.beta, gamma: lastOrientation.gamma };
-    gaze.x = gaze.targetX = 0.5;
-    gaze.y = gaze.targetY = 0.5;
-  }
-  $('vrRecenterBtn').addEventListener('click', () => { recenterGaze(); flashControls(); });
+  document.getElementById('btnStartWalk').style.display='none';
+  document.getElementById('btnStopWalk').style.display='block';
+  document.getElementById('walkStateLbl').innerHTML = '<span class="rec-dot"></span>RECORDING';
+  log('WALKING RADAR STARTED');
+  beep(660,0.08); vibrate(20);
 
-  function startGazeTracking(){
-    gaze.active = true;
-    gaze.menuVisible = false;
-    recenterGaze();
-    window.addEventListener('deviceorientation', onDeviceOrientation);
-    ['Left','Right'].forEach(side => {
-      $('gazeReticle'+side).style.display = 'block';
-      $('gazeMenu'+side).style.display = 'none';
-    });
-    // 視点操作中はタップでのコントロール表示に頼らないため常時表示にする
-    $('vrControls').classList.remove('show');
-    gazeDwellLoop();
-  }
+  S.walk.timerId = setInterval(()=>{
+    const secs = Math.floor((Date.now()-S.walk.startTime)/1000);
+    const m = pad2(Math.floor(secs/60)), s = pad2(secs%60);
+    document.getElementById('walkTime').textContent = `${m}:${s}`;
+  }, 1000);
 
-  function stopGazeTracking(){
-    gaze.active = false;
-    gaze.menuVisible = false;
-    window.removeEventListener('deviceorientation', onDeviceOrientation);
-    if (gazeRafId){ cancelAnimationFrame(gazeRafId); gazeRafId = null; }
-    ['Left','Right'].forEach(side => {
-      $('gazeReticle'+side).style.display = 'none';
-      $('gazeMenu'+side).style.display = 'none';
-    });
-  }
-
-  function performGazeAction(action){
-    switch(action){
-      case 'prev': advance(false, true); break;
-      case 'next': advance(true, true); break;
-      case 'playpause': togglePlay(); break;
-      case 'recenter': recenterGaze(); break;
-      case 'settings': showScreen('screen-settings'); break;
-      case 'exit': stopVR(); break;
+  S.walk.measureLoop = setInterval(async ()=>{
+    if (!S.walk.active) return;
+    const m = await runFullScan({silent:true});
+    if (m && S.location.available){
+      recordWalkSample(m);
     }
+  }, INTERVAL_MS[S.settings.scanInterval] || 3000);
+}
+
+function handleWalkPosition(pos){
+  const c = pos.coords;
+  if (S.walk.lastPos){
+    const d = haversine(S.walk.lastPos.lat, S.walk.lastPos.lon, c.latitude, c.longitude);
+    if (d > 0.5 && d < 200) S.walk.distance += d; // basic noise filter
   }
+  S.walk.lastPos = { lat:c.latitude, lon:c.longitude };
+  S.walk.path.push([c.latitude, c.longitude]);
+  document.getElementById('walkDist').textContent = fmtDistance(S.walk.distance);
+}
+function fmtDistance(m){
+  return m >= 1000 ? `${(m/1000).toFixed(2)} km` : `${Math.round(m)} m`;
+}
+function recordWalkSample(m){
+  const sample = {
+    sessionId: S.currentSessionId,
+    timestamp: Date.now(),
+    latitude: S.location.lat, longitude: S.location.lon, accuracy: S.location.accuracy,
+    quality: m.quality, latency: m.latency, download: m.download, upload: m.upload, packetLoss: m.packetLoss
+  };
+  DB.add('samples', sample);
+  S.walk.samples.push(sample);
+  if (typeof m.quality === 'number') S.walk.qualities.push(m.quality);
 
-  function gazeDwellLoop(){
-    if (!gaze.active) return;
-
-    // センサーの生値を毎フレーム少しずつ追従させて、細かい手ブレ・ノイズを吸収する
-    gaze.x += (gaze.targetX - gaze.x) * GAZE_SMOOTHING;
-    gaze.y += (gaze.targetY - gaze.y) * GAZE_SMOOTHING;
-
-    ['Left','Right'].forEach(side => {
-      const reticle = $('gazeReticle'+side);
-      reticle.style.left = (gaze.x * 100) + '%';
-      reticle.style.top  = (gaze.y * 100) + '%';
-    });
-
-    // 視線が下側に入った時だけメニューを表示（ヒステリシスでチラつきを防止）
-    if (!gaze.menuVisible && gaze.y > MENU_SHOW_Y){
-      gaze.menuVisible = true;
-      ['Left','Right'].forEach(side => { $('gazeMenu'+side).style.display = 'flex'; });
-    } else if (gaze.menuVisible && gaze.y < MENU_HIDE_Y){
-      gaze.menuVisible = false;
-      gaze.dwellTarget = null;
-      ['Left','Right'].forEach(side => { $('gazeMenu'+side).style.display = 'none'; });
-    }
-
-    // メニュー非表示中は狙う対象がないので判定をスキップ
-    if (!gaze.menuVisible){
-      gazeRafId = requestAnimationFrame(gazeDwellLoop);
-      return;
-    }
-
-    // ヒット判定は左目側の座標を代表として使う（左右のメニューは同一レイアウト）
-    const eyeRect = $('eyeLeft').getBoundingClientRect();
-    const hitX = eyeRect.left + gaze.x * eyeRect.width;
-    const hitY = eyeRect.top + gaze.y * eyeRect.height;
-    const el = document.elementFromPoint(hitX, hitY);
-    const target = el ? el.closest('.gaze-btn') : null;
-    const action = target ? target.dataset.action : null;
-
-    const now = performance.now();
-    if (action){
-      if (action !== gaze.dwellTarget){
-        gaze.dwellTarget = action;
-        gaze.dwellStart = now;
-      }
-      const progress = Math.min(1, Math.max(0, (now - gaze.dwellStart) / DWELL_MS));
-      setGazeProgress(action, progress);
-      if (progress >= 1){
-        gaze.dwellTarget = null;
-        gaze.dwellStart = now + 500; // 連続発火を防ぐ
-        setGazeProgress(action, 0);
-        performGazeAction(action);
-      }
-    } else if (gaze.dwellTarget){
-      setGazeProgress(gaze.dwellTarget, 0);
-      gaze.dwellTarget = null;
-    }
-
-    gazeRafId = requestAnimationFrame(gazeDwellLoop);
+  document.getElementById('walkSamples').textContent = S.walk.samples.length;
+  if (S.walk.qualities.length){
+    const avg = Math.round(S.walk.qualities.reduce((a,b)=>a+b,0)/S.walk.qualities.length);
+    document.getElementById('walkAvg').textContent = avg+'%';
+    document.getElementById('walkMaxMin').textContent = `${Math.max(...S.walk.qualities)}% / ${Math.min(...S.walk.qualities)}%`;
   }
+}
+function stopWalk(){
+  S.walk.active = false;
+  clearInterval(S.walk.timerId);
+  clearInterval(S.walk.measureLoop);
+  document.getElementById('btnStartWalk').style.display='block';
+  document.getElementById('btnStopWalk').style.display='none';
+  document.getElementById('walkStateLbl').textContent = 'STANDBY';
+  log('WALKING RADAR STOPPED');
+  beep(440,0.1); vibrate([20,40,20]);
 
-  function setGazeProgress(action, value){
-    document.querySelectorAll('.gaze-btn[data-action="' + action + '"]').forEach(btn => {
-      btn.style.setProperty('--progress', value);
+  if (S.currentSessionId){
+    const avg = S.walk.qualities.length ? Math.round(S.walk.qualities.reduce((a,b)=>a+b,0)/S.walk.qualities.length) : null;
+    const max = S.walk.qualities.length ? Math.max(...S.walk.qualities) : null;
+    const min = S.walk.qualities.length ? Math.min(...S.walk.qualities) : null;
+    DB.put('sessions', {
+      id:S.currentSessionId, start:S.walk.startTime, end:Date.now(),
+      distance:S.walk.distance, samples:S.walk.samples.length,
+      avgQuality:avg, maxQuality:max, minQuality:min
     });
   }
+  showToast('SESSION SAVED');
+}
 
-
-  const vrScreen = $('screen-vr');
-  let touchStartX = 0, touchStartY = 0, touchStartTime = 0, longPressTimer = null, moved = false;
-
-  vrScreen.addEventListener('touchstart', (e) => {
-    const t = e.changedTouches[0];
-    touchStartX = t.clientX; touchStartY = t.clientY; touchStartTime = Date.now();
-    moved = false;
-    longPressTimer = setTimeout(() => { if (!moved) togglePlay(); }, 550);
-  }, { passive:true });
-
-  vrScreen.addEventListener('touchmove', () => { moved = true; clearTimeout(longPressTimer); }, { passive:true });
-
-  vrScreen.addEventListener('touchend', (e) => {
-    clearTimeout(longPressTimer);
-    const t = e.changedTouches[0];
-    const dx = t.clientX - touchStartX;
-    const dy = t.clientY - touchStartY;
-    const dt = Date.now() - touchStartTime;
-
-    if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)){
-      advance(dx < 0, true); // 左スワイプ=次へ
-    } else if (Math.abs(dx) < 12 && Math.abs(dy) < 12 && dt < 500){
-      toggleControls();
+/* ==========================================================================
+   9. ALERTS (signal degradation)
+   ========================================================================== */
+let lastAlertTime = 0;
+function checkDegradationAlert(){
+  const th = Number(S.settings.alertThreshold);
+  if (!th) return;
+  if (typeof S.metrics.quality === 'number' && S.metrics.quality < th){
+    if (Date.now() - lastAlertTime > 15000){
+      lastAlertTime = Date.now();
+      showToast(`⚠ SIGNAL DEGRADATION — QUALITY ${S.metrics.quality}% / LATENCY ${S.metrics.latency ?? 'N/A'}ms`);
+      beep(300,0.15,'sawtooth',0.05);
+      vibrate([30,30,30]);
+      log(`ALERT: SIGNAL DEGRADATION (${S.metrics.quality}%)`);
     }
-  });
+  }
+}
 
-  function toggleControls(){
-    $('vrControls').classList.toggle('show');
-    if ($('vrControls').classList.contains('show')) scheduleAutoHide();
-    else clearTimeout(state.hideControlsTimer);
-  }
-  function flashControls(){
-    $('vrControls').classList.add('show');
-    scheduleAutoHide();
-  }
-  function scheduleAutoHide(){
-    clearTimeout(state.hideControlsTimer);
-    state.hideControlsTimer = setTimeout(() => {
-      $('vrControls').classList.remove('show');
-    }, 3000);
-  }
+/* ==========================================================================
+   10. RADAR CANVAS
+   ========================================================================== */
+const radarCanvas = document.getElementById('radarCanvas');
+const rctx = radarCanvas.getContext('2d');
+function drawRadar(){
+  const w = radarCanvas.width, h = radarCanvas.height;
+  const cx = w/2, cy = h/2, R = w*0.44;
+  rctx.clearRect(0,0,w,h);
 
-  // ---------- 画面回転の案内 ----------
-  let orientationOverride = false; // ユーザーが「このまま続ける」を選んだら以後表示しない
+  // background grid glow
+  rctx.save();
+  rctx.strokeStyle = 'rgba(0,255,156,0.18)';
+  rctx.lineWidth = 2;
+  for (let i=1;i<=4;i++){
+    rctx.beginPath();
+    rctx.arc(cx,cy,R*i/4,0,Math.PI*2);
+    rctx.stroke();
+  }
+  rctx.beginPath(); rctx.moveTo(cx-R,cy); rctx.lineTo(cx+R,cy); rctx.stroke();
+  rctx.beginPath(); rctx.moveTo(cx,cy-R); rctx.lineTo(cx,cy+R); rctx.stroke();
+  // diagonal lines
+  rctx.strokeStyle = 'rgba(0,255,156,0.08)';
+  rctx.beginPath();
+  rctx.moveTo(cx-R*0.7,cy-R*0.7); rctx.lineTo(cx+R*0.7,cy+R*0.7);
+  rctx.moveTo(cx+R*0.7,cy-R*0.7); rctx.lineTo(cx-R*0.7,cy+R*0.7);
+  rctx.stroke();
+  rctx.restore();
 
-  function checkOrientation(){
-    if (orientationOverride) { $('rotateHint').classList.remove('show'); return; }
-    // matchMedia(orientation) はプレビュー用WebView内では更新されないことがあるため、
-    // 実際のwindowの縦横比で判定する
-    const isPortrait = window.innerHeight > window.innerWidth;
-    $('rotateHint').classList.toggle('show', isPortrait);
-  }
+  // outer ring
+  rctx.beginPath(); rctx.arc(cx,cy,R,0,Math.PI*2);
+  rctx.strokeStyle = 'rgba(0,255,156,0.6)'; rctx.lineWidth=2; rctx.stroke();
 
-  $('rotateSkip').addEventListener('click', () => {
-    orientationOverride = true;
-    $('rotateHint').classList.remove('show');
-  });
-
-  function scheduleOrientationCheck(){
-    // orientationchange直後は寸法がまだ更新されていないことがあるため少し待つ
-    setTimeout(() => { checkOrientation(); setupCanvasSizes(); drawCurrentToCanvases(); }, 50);
-    setTimeout(() => { checkOrientation(); setupCanvasSizes(); drawCurrentToCanvases(); }, 300);
-  }
-  window.addEventListener('resize', () => {
-    if (!$('screen-vr').classList.contains('hidden')) scheduleOrientationCheck();
-  });
-  window.addEventListener('orientationchange', () => {
-    if (!$('screen-vr').classList.contains('hidden')) scheduleOrientationCheck();
-  });
-
-  // ---------- フルスクリーン ----------
-  function requestFullscreenIfPossible(){
-    const el = document.documentElement;
-    const req = el.requestFullscreen || el.webkitRequestFullscreen;
-    if (req) { try { req.call(el); } catch(e) {} }
-  }
-  function exitFullscreenIfPossible(){
-    const exit = document.exitFullscreen || document.webkitExitFullscreen;
-    if (document.fullscreenElement && exit) { try { exit.call(document); } catch(e) {} }
-  }
-  function toggleFullscreenManually(){
-    const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
-    if (isFs) exitFullscreenIfPossible();
-    else requestFullscreenIfPossible();
-  }
-  $('vrFullscreenBtn').addEventListener('click', () => {
-    toggleFullscreenManually();
-    flashControls();
-  });
-  function updateFullscreenIcon(){
-    const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
-    $('vrFullscreenBtn').textContent = isFs ? '⛶' : '⛶';
-    $('vrFullscreenBtn').style.color = isFs ? 'var(--cyan)' : 'var(--text)';
-  }
-  document.addEventListener('fullscreenchange', updateFullscreenIcon);
-  document.addEventListener('webkitfullscreenchange', updateFullscreenIcon);
-
-  // ---------- スリープ防止（Screen Wake Lock API） ----------
-  async function requestWakeLock(){
-    try {
-      if ('wakeLock' in navigator){
-        state.wakeLock = await navigator.wakeLock.request('screen');
-      }
-    } catch(e) { /* 対応していない場合は無視 */ }
-  }
-  function releaseWakeLock(){
-    if (state.wakeLock){ state.wakeLock.release().catch(()=>{}); state.wakeLock = null; }
-  }
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && !$('screen-vr').classList.contains('hidden')){
-      requestWakeLock();
+  // directional quality ring — real measured averages per compass sector, never fabricated
+  const ringR = R*1.09;
+  const sectorArc = (Math.PI*2)/SECTORS;
+  for (let i=0;i<SECTORS;i++){
+    const st = S.dirStats[i];
+    const a0 = (sectorCenterDeg(i)-90-360/SECTORS/2) * Math.PI/180;
+    const a1 = a0 + sectorArc;
+    rctx.beginPath();
+    rctx.arc(cx,cy,ringR,a0,a1);
+    if (st && st.count){
+      rctx.strokeStyle = qualityColor(Math.round(st.sum/st.count));
+      rctx.globalAlpha = 0.85;
+    } else {
+      rctx.strokeStyle = 'rgba(0,255,156,0.12)';
+      rctx.globalAlpha = 1;
     }
-  });
+    rctx.lineWidth = 7;
+    rctx.stroke();
+    rctx.globalAlpha = 1;
+  }
+  // compass needle — current facing direction only (not an AP direction)
+  if (S.compassHeading !== null){
+    const ang = (S.compassHeading-90) * Math.PI/180;
+    const nx = cx + ringR*Math.cos(ang), ny = cy + ringR*Math.sin(ang);
+    rctx.beginPath();
+    rctx.arc(nx,ny,7,0,Math.PI*2);
+    rctx.fillStyle = '#FFFFFF';
+    rctx.shadowColor = '#00CFFF'; rctx.shadowBlur = 8;
+    rctx.fill();
+    rctx.shadowBlur = 0;
+  }
 
-  // ---------- 初期化 ----------
-  renderSettings();
-  showScreen('screen-home');
+  // pulse rings (quality-reactive)
+  const q = (typeof S.metrics.quality === 'number') ? S.metrics.quality : 40;
+  const t = performance.now()/1000;
+  for (let i=0;i<3;i++){
+    const phase = (t*0.5 + i/3) % 1;
+    const rr = R*phase;
+    rctx.beginPath(); rctx.arc(cx,cy,rr,0,Math.PI*2);
+    rctx.strokeStyle = `rgba(0,255,156,${(1-phase)*0.35})`;
+    rctx.lineWidth = 1.5; rctx.stroke();
+  }
+
+  // sweep
+  const speed = S.radarSweeping ? 0.006 : 0.0016; // radians/frame approx via time-based below
+  S.radarAngle += (S.radarSweeping ? 0.11 : 0.03);
+  const grad = rctx.createConicGradient ? rctx.createConicGradient(S.radarAngle - Math.PI/2, cx, cy) : null;
+  rctx.save();
+  rctx.beginPath();
+  rctx.moveTo(cx,cy);
+  const sweepWidth = 0.55;
+  rctx.arc(cx,cy,R, S.radarAngle-sweepWidth, S.radarAngle);
+  rctx.closePath();
+  const col = S.radarSweeping ? 'rgba(0,207,255,0.28)' : 'rgba(0,255,156,0.16)';
+  rctx.fillStyle = col;
+  rctx.fill();
+  rctx.restore();
+
+  // sweep leading edge line
+  rctx.save();
+  rctx.beginPath();
+  rctx.moveTo(cx,cy);
+  rctx.lineTo(cx+R*Math.cos(S.radarAngle), cy+R*Math.sin(S.radarAngle));
+  rctx.strokeStyle = S.radarSweeping ? '#00CFFF' : '#00FF9C';
+  rctx.lineWidth = 2;
+  rctx.shadowColor = rctx.strokeStyle; rctx.shadowBlur = 8;
+  rctx.stroke();
+  rctx.restore();
+
+  // center point
+  rctx.beginPath(); rctx.arc(cx,cy,5,0,Math.PI*2);
+  rctx.fillStyle = '#00CFFF'; rctx.shadowColor='#00CFFF'; rctx.shadowBlur=10; rctx.fill();
+  rctx.shadowBlur = 0;
+
+  requestAnimationFrame(drawRadar);
+}
+requestAnimationFrame(drawRadar);
+function setRadarSweeping(v){
+  S.radarSweeping = v;
+  document.getElementById('radarCaption').textContent = v ? 'SIGNAL RADAR // SCANNING...' : 'SIGNAL RADAR // IDLE';
+}
+
+/* ==========================================================================
+   11. GRAPH CANVAS
+   ========================================================================== */
+const graphCanvas = document.getElementById('graphCanvas');
+const gctx = graphCanvas.getContext('2d');
+function pushGraphSample(){
+  const t = nowStr();
+  ['quality','latency','download','upload'].forEach(k=>{
+    const val = S.metrics[k === 'quality' ? 'quality' : k];
+    S.graphData[k].push({ t, v: (typeof val === 'number') ? val : null });
+    if (S.graphData[k].length > GRAPH_MAX_SAMPLES) S.graphData[k].shift();
+  });
+  drawGraph();
+}
+function drawGraph(){
+  const w = graphCanvas.width, h = graphCanvas.height;
+  gctx.clearRect(0,0,w,h);
+  const data = S.graphData[S.currentGraph];
+  const vals = data.map(d=>d.v).filter(v=>v!==null);
+  gctx.strokeStyle = 'rgba(0,255,156,0.12)';
+  gctx.lineWidth = 1;
+  for (let i=0;i<=4;i++){
+    const y = h - (h*i/4);
+    gctx.beginPath(); gctx.moveTo(0,y); gctx.lineTo(w,y); gctx.stroke();
+  }
+  document.getElementById('graphRangeLbl').textContent = data.length ? `${data.length} SAMPLES` : 'NO DATA';
+  if (vals.length < 2) return;
+  const max = Math.max(...vals, 1);
+  const min = 0;
+  const stepX = w / (GRAPH_MAX_SAMPLES-1);
+  const offset = GRAPH_MAX_SAMPLES - data.length;
+
+  gctx.beginPath();
+  let started = false;
+  data.forEach((d,i)=>{
+    if (d.v===null) { started=false; return; }
+    const x = (offset+i)*stepX;
+    const y = h - ((d.v-min)/(max-min))*h*0.9 - h*0.05;
+    if (!started){ gctx.moveTo(x,y); started=true; } else gctx.lineTo(x,y);
+  });
+  gctx.strokeStyle = '#00FF9C';
+  gctx.lineWidth = 2;
+  gctx.shadowColor = '#00FF9C'; gctx.shadowBlur = 4;
+  gctx.stroke();
+  gctx.shadowBlur = 0;
+
+  // fill under curve
+  gctx.lineTo(w, h); gctx.lineTo(0,h); gctx.closePath();
+  gctx.fillStyle = 'rgba(0,255,156,0.07)';
+  gctx.fill();
+}
+
+/* ==========================================================================
+   12. UI RENDERING
+   ========================================================================== */
+function updateMetricsUI(){
+  const m = S.metrics;
+  document.getElementById('mLatency').textContent = m.latency!==null ? `${m.latency} ms` : 'N/A';
+  document.getElementById('mLatency').className = 'metric-val' + (m.latency===null?' na':'');
+  document.getElementById('mLoss').textContent = m.packetLoss!==null ? `${m.packetLoss} %` : 'N/A';
+  document.getElementById('mLoss').className = 'metric-val' + (m.packetLoss===null?' na':'');
+  document.getElementById('mDown').textContent = m.download!==null ? `${m.download} Mbps` : 'N/A';
+  document.getElementById('mDown').className = 'metric-val' + (m.download===null?' na':'');
+  document.getElementById('mUp').textContent = m.upload!==null ? `${m.upload} Mbps` : 'N/A';
+  document.getElementById('mUp').className = 'metric-val' + (m.upload===null?' na':'');
+
+  const q = m.quality;
+  document.getElementById('qualityVal').textContent = q!==null ? q : '--';
+  const tagInfo = qualityTag(q);
+  const tagEl = document.getElementById('qualityTag');
+  tagEl.textContent = tagInfo.tag;
+  tagEl.style.color = tagInfo.color;
+  document.getElementById('qualityBar').style.width = (q!==null ? q : 0) + '%';
+  document.getElementById('qualityScoreLbl').textContent = q!==null ? `RSSI N/A` : 'RSSI N/A';
+}
+function renderLocationPanel(errorMsg){
+  const badge = document.getElementById('gpsBadge');
+  if (errorMsg){
+    badge.textContent = errorMsg;
+    document.getElementById('locLat').textContent = 'N/A';
+    document.getElementById('locLon').textContent = 'N/A';
+    document.getElementById('locAcc').textContent = 'N/A';
+    document.getElementById('locHeading').textContent = 'N/A';
+    document.getElementById('locSpeed').textContent = 'N/A';
+    return;
+  }
+  const l = S.location;
+  badge.textContent = l.available ? 'LOCKED' : 'ACQUIRING...';
+  document.getElementById('locLat').textContent = l.lat!==null ? l.lat.toFixed(6) : 'N/A';
+  document.getElementById('locLon').textContent = l.lon!==null ? l.lon.toFixed(6) : 'N/A';
+  document.getElementById('locAcc').textContent = l.accuracy!==null ? `±${Math.round(l.accuracy)} m` : 'N/A';
+  document.getElementById('locHeading').textContent = l.heading!==null ? `${l.heading}°` : 'N/A';
+  document.getElementById('locSpeed').textContent = l.speed!==null ? `${l.speed.toFixed(1)} km/h` : 'N/A';
+}
+function renderNetworkPanel(){
+  document.getElementById('netType').textContent = S.network.type;
+  document.getElementById('netDownlinkHint').textContent = S.network.downlinkHint;
+  document.getElementById('netRttHint').textContent = S.network.rttHint;
+  document.getElementById('netSsid').textContent = S.network.ssid;
+  document.getElementById('netRssi').textContent = S.network.rssi;
+}
+function renderOnlineStatus(){
+  S.online = navigator.onLine;
+  document.getElementById('onlineDot').classList.toggle('off', !S.online);
+  document.getElementById('onlineText').textContent = S.online ? 'SYSTEM ONLINE' : 'SYSTEM OFFLINE';
+  const line = document.getElementById('netStatusLine');
+  line.innerHTML = S.online
+    ? `<span class="dot"></span><span>CONNECTED</span>`
+    : `<span class="dot off"></span><span style="color:var(--danger)">OFFLINE</span>`;
+  log(S.online ? 'NETWORK ACTIVE' : 'NETWORK OFFLINE');
+}
+function renderLog(){
+  const el = document.getElementById('logList');
+  el.innerHTML = S.logLines.map(l=>{
+    const idx = l.indexOf(']');
+    return `<div><span class="t">${l.slice(0,idx+1)}</span>${l.slice(idx+1)}</div>`;
+  }).join('');
+}
+function clockTick(){
+  document.getElementById('clockTxt').textContent = nowStr();
+  requestAnimationFrame(()=>setTimeout(clockTick,500));
+}
+clockTick();
+
+/* ==========================================================================
+   13. SCREEN NAV
+   ========================================================================== */
+function showScreen(id){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+document.getElementById('btnSettings').onclick = ()=>showScreen('screen-settings');
+document.getElementById('settingsBack').onclick = ()=>showScreen('screen-main');
+document.getElementById('logBack').onclick = ()=>showScreen('screen-main');
+document.getElementById('mapBack').onclick = ()=>showScreen('screen-main');
+document.getElementById('walkBack').onclick = ()=>{ if(!S.walk.active) showScreen('screen-main'); else showToast('WALKING RADAR実行中です'); };
+document.getElementById('historyBack').onclick = ()=>showScreen('screen-settings');
+document.getElementById('iosBack').onclick = ()=>showScreen('screen-main');
+document.getElementById('btnIosInfo').onclick = ()=>showScreen('screen-ios');
+document.getElementById('btnOpenHistory').onclick = ()=>{ renderHistory(); showScreen('screen-history'); };
+
+document.getElementById('navScan').onclick = ()=>runFullScan({silent:false});
+document.getElementById('navWalk').onclick = ()=>showScreen('screen-walk');
+document.getElementById('navMap').onclick = ()=>{ showScreen('screen-map'); initOrRefreshMap(); };
+document.getElementById('navLog').onclick = ()=>{ renderLog(); showScreen('screen-log'); };
+
+document.getElementById('btnStartWalk').onclick = startWalk;
+document.getElementById('btnStopWalk').onclick = stopWalk;
+
+document.querySelectorAll('.graph-tab').forEach(btn=>{
+  btn.onclick = ()=>{
+    document.querySelectorAll('.graph-tab').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    S.currentGraph = btn.dataset.g;
+    drawGraph();
+  };
+});
+
+document.querySelectorAll('.seg').forEach(seg=>{
+  const key = seg.dataset.setting;
+  seg.querySelectorAll('.seg-btn').forEach(btn=>{
+    btn.onclick = ()=>{
+      seg.querySelectorAll('.seg-btn').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      let val = btn.dataset.val;
+      if (key==='alertThreshold') val = Number(val);
+      saveSetting(key, val);
+      if (key==='scanInterval') document.getElementById('walkIntervalLbl').textContent =
+        `INTERVAL: ${val} (${INTERVAL_MS[val]/1000}s)`;
+    };
+  });
+});
+function applySettingsToUI(){
+  document.querySelectorAll('.seg').forEach(seg=>{
+    const key = seg.dataset.setting;
+    const val = String(S.settings[key]);
+    seg.querySelectorAll('.seg-btn').forEach(b=>{
+      b.classList.toggle('active', b.dataset.val === val);
+    });
+  });
+  document.getElementById('walkIntervalLbl').textContent =
+    `INTERVAL: ${S.settings.scanInterval} (${INTERVAL_MS[S.settings.scanInterval]/1000}s)`;
+}
+
+/* ==========================================================================
+   14. MAP (Leaflet)
+   ========================================================================== */
+let leafletMap = null, mapLayerGroup = null;
+function initOrRefreshMap(){
+  if (!leafletMap){
+    leafletMap = L.map('mapEl', { zoomControl:true, attributionControl:true }).setView([35.681,139.767], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom:19, attribution:'&copy; OpenStreetMap contributors'
+    }).addTo(leafletMap);
+    mapLayerGroup = L.layerGroup().addTo(leafletMap);
+  }
+  setTimeout(()=>leafletMap.invalidateSize(), 150);
+  renderMapPoints();
+}
+function qualityColor(q){
+  if (q===null || q===undefined) return '#00CFFF';
+  if (q>=75) return '#00FF9C';
+  if (q>=50) return '#FFB000';
+  return '#FF304F';
+}
+async function renderMapPoints(){
+  if (!leafletMap) return;
+  mapLayerGroup.clearLayers();
+  const samples = await DB.getAll('samples');
+  const valid = samples.filter(s=>typeof s.latitude==='number' && typeof s.longitude==='number');
+  valid.forEach(s=>{
+    L.circleMarker([s.latitude, s.longitude], {
+      radius:6, color:qualityColor(s.quality), fillColor:qualityColor(s.quality),
+      fillOpacity:0.55, weight:1
+    }).bindPopup(`QUALITY ${s.quality ?? 'N/A'}%<br>${new Date(s.timestamp).toLocaleString()}`).addTo(mapLayerGroup);
+  });
+  if (valid.length){
+    const poly = L.polyline(valid.map(s=>[s.latitude,s.longitude]), { color:'#00CFFF', weight:2, opacity:0.5 }).addTo(mapLayerGroup);
+    L.circleMarker([valid[0].latitude, valid[0].longitude], { radius:8, color:'#00CFFF', fillColor:'#00CFFF', fillOpacity:0.9 })
+      .bindPopup('START').addTo(mapLayerGroup);
+    const last = valid[valid.length-1];
+    L.circleMarker([last.latitude, last.longitude], { radius:8, color:'#00CFFF', fillColor:'#00CFFF', fillOpacity:0.9 })
+      .bindPopup('CURRENT').addTo(mapLayerGroup);
+    leafletMap.fitBounds(poly.getBounds().pad(0.2));
+  } else if (S.location.available){
+    leafletMap.setView([S.location.lat, S.location.lon], 16);
+    L.circleMarker([S.location.lat, S.location.lon], { radius:8, color:'#00CFFF', fillColor:'#00CFFF', fillOpacity:0.9 })
+      .bindPopup('CURRENT').addTo(mapLayerGroup);
+  }
+}
+
+/* ==========================================================================
+   15. HISTORY
+   ========================================================================== */
+async function renderHistory(){
+  const sessions = (await DB.getAll('sessions')).filter(s=>s.end).sort((a,b)=>b.start-a.start);
+  const el = document.getElementById('historyList');
+  if (!sessions.length){
+    el.innerHTML = '<div class="empty-hint">NO SESSIONS RECORDED YET</div>';
+    return;
+  }
+  el.innerHTML = sessions.map((s,i)=>{
+    const num = String(sessions.length-i).padStart(3,'0');
+    return `<div class="hist-item">
+      <div class="hist-top"><span>#${num}</span><span>${fmtDate(s.start)}</span></div>
+      <div class="hist-grid">
+        <span>DIST <b>${fmtDistance(s.distance||0)}</b></span>
+        <span>SAMPLES <b>${s.samples||0}</b></span>
+        <span>AVG <b>${s.avgQuality ?? 'N/A'}${s.avgQuality!==null && s.avgQuality!==undefined ?'%':''}</b></span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+/* ==========================================================================
+   16. EXPORT
+   ========================================================================== */
+function downloadBlob(content, filename, type){
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 2000);
+}
+document.getElementById('btnExportJson').onclick = async ()=>{
+  const samples = await DB.getAll('samples');
+  const sessions = await DB.getAll('sessions');
+  downloadBlob(JSON.stringify({ sessions, samples }, null, 2), `wifi-radar-export-${Date.now()}.json`, 'application/json');
+  log('EXPORT: JSON');
+};
+document.getElementById('btnExportCsv').onclick = async ()=>{
+  const samples = await DB.getAll('samples');
+  const header = 'timestamp,latitude,longitude,accuracy,quality,latency,download,upload,packetLoss';
+  const rows = samples.map(s=>[
+    new Date(s.timestamp).toISOString(), s.latitude??'', s.longitude??'', s.accuracy??'',
+    s.quality??'', s.latency??'', s.download??'', s.upload??'', s.packetLoss??''
+  ].join(','));
+  downloadBlob([header, ...rows].join('\n'), `wifi-radar-export-${Date.now()}.csv`, 'text/csv');
+  log('EXPORT: CSV');
+};
+
+/* ==========================================================================
+   17. BOOT SEQUENCE
+   ========================================================================== */
+const BOOT_STEPS = ['POWER ON','LOADING RADAR CORE','INITIALIZING SENSOR','LOCATION MODULE','NETWORK MODULE','SIGNAL ANALYZER','SYSTEM READY'];
+function playBootLog(){
+  return new Promise(resolve=>{
+    const el = document.getElementById('bootLog');
+    let i=0;
+    function next(){
+      if (i>=BOOT_STEPS.length){ resolve(); return; }
+      const d = document.createElement('div');
+      d.innerHTML = `<span>&gt;</span> ${BOOT_STEPS[i]}`;
+      el.appendChild(d);
+      el.scrollTop = el.scrollHeight;
+      i++;
+      setTimeout(next, 260);
+    }
+    next();
+  });
+}
+playBootLog();
+
+document.getElementById('btnInit').addEventListener('click', async ()=>{
+  const btn = document.getElementById('btnInit');
+  btn.textContent = '[ SYSTEM ONLINE ]';
+  btn.disabled = true;
+  await loadSettings();
+  updateNetworkInfoHints();
+  renderOnlineStatus();
+  startGeoWatch();
+  await loadDirStats();
+  initCompass();
+  log('SYSTEM ONLINE');
+  showScreen('screen-main');
+  if (S.settings.autoScan === 'ON') runFullScan({silent:false});
+  if ('serviceWorker' in navigator){
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  }
+});
+
+/* ==========================================================================
+   18. GLOBAL EVENTS
+   ========================================================================== */
+window.addEventListener('online', renderOnlineStatus);
+window.addEventListener('offline', renderOnlineStatus);
+window.addEventListener('beforeunload', ()=>{
+  if (geoWatchId!==null) navigator.geolocation.clearWatch(geoWatchId);
+  if (S.walk.active){ clearInterval(S.walk.timerId); clearInterval(S.walk.measureLoop); }
+});
+
+if ('connection' in navigator){
+  navigator.connection.addEventListener?.('change', updateNetworkInfoHints);
+}
+
 })();
 </script>
 </body>
